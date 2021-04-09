@@ -1,0 +1,12 @@
+[submodule "elfo"]
+	path = elfo
+	url = git@gitlab.cs.fau.de:heinloth/elfo.git
+[submodule "xxhash"]
+	path = xxhash
+	url = https://github.com/stbrumme/xxhash.git
+[submodule "intervaltree"]
+	path = intervaltree
+	url = https://github.com/ekg/intervaltree.git
+[submodule "capstone"]
+	path = capstone
+	url = https://github.com/aquynh/capstone.git
