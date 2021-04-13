@@ -3,7 +3,7 @@
 #include <cstdio>
 
 #include <algorithm>
-#include <set>
+#include <unordered_set>
 #include <map>
 #include <vector>
 
@@ -30,8 +30,8 @@ struct Bean {
 		/*! \brief Refs identifier */
 		uint64_t id_ref;
 
-		/*! \brief Symbol addresses using this symbol */
-		std::set<uintptr_t> deps;
+		/*! \brief Symbol ids using this symbol */
+		std::unordered_set<uintptr_t> deps;
 
 		/*! \brief Reference of used symbols */
 		std::vector<uintptr_t> refs;
@@ -61,15 +61,133 @@ struct Bean {
 				refs.push_back(to);
 		}
 
-		//bool operator
+		bool operator==(const Symbol & that) const {
+			return this->id == that.id && this->id_ref == that.id_ref && this->refs.size() == that.refs.size() && this->deps.size() == that.deps.size();
+		}
 	};
 
-	const Elf & elf;
-	std::map<uintptr_t, Symbol> symbols;
+	class SymbolHash {
+	 public:
+		size_t operator()(const Symbol& sym) const {
+			return sym.id ^ sym.id_ref;
+		}
+	};
 
-	Bean(const Elf & elf) : elf(elf) {
-		// 1. Read symbols and segments
+	typedef std::unordered_set<Symbol, SymbolHash> symbols_t;
+
+	const Elf & elf;
+	const std::map<uintptr_t, Symbol> symbols;
+
+	Bean(const Elf & elf) : elf(elf), symbols(analyze(elf)) {}
+
+	void dump(bool name = false) const {
+		if (name)
+			printf("ID               ID refs           Refs - Address             Size  Name\n");
+		for (auto & symbol_node : symbols) {
+			auto & sym = symbol_node.second;
+			if (name)
+				printf("%016lx %016lx [%3lu] - 0x%016lx %6lu %s\n", sym.id, sym.id_ref, sym.refs.size(), sym.address, sym.size, sym.name);
+			else
+				printf("%016lx %016lx\n", sym.id, sym.id_ref);
+		}
+	}
+
+	const symbols_t hashset() const {
+		symbols_t symbolset;
+		for (auto & symbol_node : symbols) {
+			auto & sym = symbol_node.second;
+			symbolset.insert(sym);
+		}
+		return symbolset;
+	}
+
+	const symbols_t diff(const symbols_t & other_symbols, bool include_dependencies = false) const {
+		symbols_t result;
+		for (const auto & symbol_node : symbols) {
+			auto & sym = symbol_node.second;
+			if (other_symbols.count(sym) == 0 && result.insert(sym).second && include_dependencies)
+				for (const auto d: sym.deps)
+					dependencies(d, result);
+		}
+		return result;
+	}
+
+	const symbols_t diff(const Bean & other, bool include_dependencies = false) const {
+		return diff(other.hashset(), include_dependencies);
+	}
+
+ private:
+	void dependencies(uintptr_t address, symbols_t & result) const {
+		auto sym = symbols.lower_bound(~address);
+		if (sym != symbols.end() && result.insert(sym->second).second)
+			for (const auto d: sym->second.deps)
+				dependencies(d, result);
+	}
+
+	static bool branch_relative(unsigned int instruction) {
+		switch (instruction) {
+			case X86_INS_JAE:
+			case X86_INS_JA:
+			case X86_INS_JBE:
+			case X86_INS_JB:
+			case X86_INS_JCXZ:
+			case X86_INS_JECXZ:
+			case X86_INS_JE:
+			case X86_INS_JGE:
+			case X86_INS_JG:
+			case X86_INS_JLE:
+			case X86_INS_JL:
+			case X86_INS_JMP:
+			case X86_INS_JNE:
+			case X86_INS_JNO:
+			case X86_INS_JNP:
+			case X86_INS_JNS:
+			case X86_INS_JO:
+			case X86_INS_JP:
+			case X86_INS_JRCXZ:
+			case X86_INS_JS:
+
+			case X86_INS_CALL:
+
+			case X86_INS_LOOP:
+			case X86_INS_LOOPE:
+			case X86_INS_LOOPNE:
+
+			case X86_INS_XBEGIN:
+				return true;
+
+			default:
+				return false;
+		}
+	}
+
+	static void insert(std::map<uintptr_t, Symbol> & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
+		auto pos = symbols.find(~address);
+		if (pos == symbols.end())
+			symbols.emplace_hint(pos, ~address, Symbol{address, size, name});
+		else
+			pos->second.merge(address, size, name);
+	}
+/*
+	void merge(std::map<uintptr_t, Symbol>::iterator & pos, uintptr_t address, size_t size = 0, const char * name = nullptr) {
+		if (pos == symbols.end()) {
+			symbols.emplace_hint(pos, ~address, Symbol{address, size, name});
+		} else if (address < pos->second.address) {
+			auto sym = symbols.extract(pos);
+			sym.mapped().merge(address, size, name);
+			sym.key() = ~address;
+			symbols.insert(std::move(sym));
+		} else {
+			pos->second.merge(address, size, name);
+		}
+	}
+*/
+
+	static std::map<uintptr_t, Symbol> analyze(const Elf &elf) {
+		std::map<uintptr_t, Symbol> symbols;
 		std::map<uintptr_t, Elf::Section> sections;
+
+		// 1. Read symbols and segments
 		for (const auto & section: elf.sections) {
 			if (section.allocate())
 				sections.insert(std::make_pair(~section.virt_addr(), section));
@@ -96,7 +214,7 @@ struct Bean {
 								assert(sym.value() >= elf.sections[sym.section_index()].virt_addr());
 								assert(sym.value() + sym.size() <= elf.sections[sym.section_index()].virt_addr() + elf.sections[sym.section_index()].size());
 								if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
-									insert(sym.value(), sym.size(), sym.name());
+									insert(symbols, sym.value(), sym.size(), sym.name());
 						}
 					break;
 
@@ -107,11 +225,10 @@ struct Bean {
 		// Prepare disassembly
 		csh cshandle;
 		if (::cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) != CS_ERR_OK) // todo: depending on ELF
-			return;
+			return {};
 		::cs_option(cshandle, CS_OPT_DETAIL, CS_OPT_ON);
 
 		cs_insn *insn = cs_malloc(cshandle);
-		std::set<uintptr_t> funcs;
 
 		// 2. Gather (additional) function start addresses by reading call-targets
 		//    if call target exists (from symtab)-> ignore
@@ -121,7 +238,7 @@ struct Bean {
 				const auto index = elf.sections.index(section);
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
 				uintptr_t address = section.virt_addr();
-				insert(address, 0, section.name());
+				insert(symbols, address, 0, section.name());
 
 				size_t size = section.size();
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
@@ -130,10 +247,10 @@ struct Bean {
 							auto & detail_x86 = insn->detail->x86;
 							auto & op = detail_x86.operands[detail_x86.op_count - 1];
 							if (op.type == X86_OP_IMM)
-								insert(op.imm);
+								insert(symbols, op.imm);
 							else if (op.type == X86_OP_MEM && op.mem.base == X86_REG_RIP) {
 								// Ignore segment, index, scale
-								insert(insn->address + insn->size + op.mem.disp);
+								insert(symbols, insn->address + insn->size + op.mem.disp);
 							}
 						}
 					}
@@ -153,7 +270,9 @@ struct Bean {
 			const size_t max_addr = std::min(last_addr, section.virt_addr() + section.size());
 			uintptr_t address = sym.address;
 			assert(max_addr > address);
-			sym.size = std::max(sym.size, max_addr - address);
+			const size_t max_size = max_addr - address;
+			if (max_size > sym.size)
+				sym.size = max_size;
 
 			// 3b. generate links (from jmp + call) & hash
 			const size_t offset = address - section.virt_addr();
@@ -201,7 +320,7 @@ struct Bean {
 		}
 		cs_free(insn, 1);
 
-		// 4. Calculate full id and set dependencies
+		// 4. Calculate full id, set dependencies and add to final set
 		for (auto & symbol_node : symbols) {
 			auto & sym = symbol_node.second;
 
@@ -210,88 +329,18 @@ struct Bean {
 				for (const auto ref : sym.refs) {
 					auto ref_sym = symbols.lower_bound(~ref);
 					if (ref_sym != symbols.end()) {
-						id_ref.add(&(ref_sym->second.id), sizeof(uint64_t));
+						// Hash ID and offset
+						const uint64_t r[2] = { ref_sym->second.id, ref - ref_sym->second.address};
+						id_ref.add(r, 2 * sizeof(uint64_t));
 						ref_sym->second.deps.insert(sym.address);
 					} else {
-						//printf("Unresolved call to %lx from %lx %s\n", ref, sym.address, sym.name);
+						// TODO
 					}
 				}
 				sym.id_ref = id_ref.hash();
 			}
-
-			//printf("%016lx / %016lx @ %016lx [%lu] %s: %lu\n", sym.id, sym.id_ref, sym.address, sym.size, sym.name, sym.refs.size());
 		}
+
+		return symbols;
 	}
-
-	const Symbol * get(uintptr_t address) const {
-		auto sym = symbols.lower_bound(~address);
-		return sym == symbols.end() ? nullptr : &(sym->second);
-	}
-
-	const void dump() const {
-		for (auto & symbol_node : symbols) {
-			auto & sym = symbol_node.second;
-			printf("%016lx / %016lx @ %016lx [%lu] %s: %lu\n", sym.id, sym.id_ref, sym.address, sym.size, sym.name, sym.refs.size());
-		}
-	}
- private:
-
-	static bool branch_relative(unsigned int instruction) {
-		switch (instruction) {
-			case X86_INS_JAE:
-			case X86_INS_JA:
-			case X86_INS_JBE:
-			case X86_INS_JB:
-			case X86_INS_JCXZ:
-			case X86_INS_JECXZ:
-			case X86_INS_JE:
-			case X86_INS_JGE:
-			case X86_INS_JG:
-			case X86_INS_JLE:
-			case X86_INS_JL:
-			case X86_INS_JMP:
-			case X86_INS_JNE:
-			case X86_INS_JNO:
-			case X86_INS_JNP:
-			case X86_INS_JNS:
-			case X86_INS_JO:
-			case X86_INS_JP:
-			case X86_INS_JRCXZ:
-			case X86_INS_JS:
-
-			case X86_INS_CALL:
-
-			case X86_INS_LOOP:
-			case X86_INS_LOOPE:
-			case X86_INS_LOOPNE:
-
-			case X86_INS_XBEGIN:
-				return true;
-
-			default:
-				return false;
-		}
-	}
-
-	void insert(uintptr_t address, size_t size = 0, const char * name = nullptr) {
-		auto pos = symbols.find(~address);
-		if (pos == symbols.end())
-			symbols.emplace_hint(pos, ~address, Symbol{address, size, name});
-		else
-			pos->second.merge(address, size, name);
-	}
-
-	void merge(std::map<uintptr_t, Symbol>::iterator & pos, uintptr_t address, size_t size = 0, const char * name = nullptr) {
-		if (pos == symbols.end()) {
-			symbols.emplace_hint(pos, ~address, Symbol{address, size, name});
-		} else if (address < pos->second.address) {
-			auto sym = symbols.extract(pos);
-			sym.mapped().merge(address, size, name);
-			sym.key() = ~address;
-			symbols.insert(std::move(sym));
-		} else {
-			pos->second.merge(address, size, name);
-		}
-	}
-
 };
