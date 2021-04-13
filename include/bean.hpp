@@ -61,6 +61,18 @@ struct Bean {
 				refs.push_back(to);
 		}
 
+		static void dump_header() {
+			printf("ID               ID refs          [Ref / Dep] - Address             Size  Name\n");
+		}
+
+		void dump(bool verbose = false) const {
+			if (verbose)
+				//printf("%016lx %016lx [%3lu / %3lu] - 0x%016lx %6lu %s\n", id, id_ref, refs.size(), deps.size(), address, size, name);
+				printf("%016lx %016lx [%3lu / %3lu] - 0x%016lx %6lu %s\n", id, id_ref, refs.size(), deps.size(), address, size, name);
+			else
+				printf("%016lx %016lx\n", id, id_ref);
+		}
+
 		bool operator==(const Symbol & that) const {
 			return this->id == that.id && this->id_ref == that.id_ref && this->refs.size() == that.refs.size() && this->deps.size() == that.deps.size();
 		}
@@ -80,16 +92,18 @@ struct Bean {
 
 	Bean(const Elf & elf) : elf(elf), symbols(analyze(elf)) {}
 
-	void dump(bool name = false) const {
-		if (name)
-			printf("ID               ID refs           Refs - Address             Size  Name\n");
-		for (auto & symbol_node : symbols) {
-			auto & sym = symbol_node.second;
-			if (name)
-				printf("%016lx %016lx [%3lu] - 0x%016lx %6lu %s\n", sym.id, sym.id_ref, sym.refs.size(), sym.address, sym.size, sym.name);
-			else
-				printf("%016lx %016lx\n", sym.id, sym.id_ref);
-		}
+	void dump(bool verbose = false) const {
+		if (verbose)
+			Symbol::dump_header();
+		for (auto & symbol_node : symbols)
+			symbol_node.second.dump(verbose);
+	}
+
+	static void dump(const symbols_t & symbols, bool verbose = false) {
+		if (verbose)
+			Symbol::dump_header();
+		for (auto & sym: symbols)
+			sym.dump(verbose);
 	}
 
 	const symbols_t hashset() const {
@@ -269,7 +283,7 @@ struct Bean {
 			// 3a. calculate size (if 0), TODO: ignore nops!
 			const size_t max_addr = std::min(last_addr, section.virt_addr() + section.size());
 			uintptr_t address = sym.address;
-			assert(max_addr > address);
+			assert(max_addr >= address);
 			const size_t max_size = max_addr - address;
 			if (max_size > sym.size)
 				sym.size = max_size;

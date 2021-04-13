@@ -1,2 +1,4 @@
 .deps/
 hash
+diff
+*.old
