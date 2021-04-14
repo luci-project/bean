@@ -61,18 +61,20 @@ int main(int argc, const char *argv[]) {
 			std::cout << ":" << std::endl;
 
 			size_t i = 0, m = 0;
-			for (auto it = std::make_reverse_iterator(b->bean.symbols.upper_bound(~(section.virt_addr()))); it != b->bean.symbols.rend() && it->first > ~(section.virt_addr() + section.size()); ++it) {
+			const auto begin = b->bean.find(section.virt_addr());
+			const auto end = b->bean.find(section.virt_addr() + section.size());
+			for (auto it = begin; it != end; ++it) {
 				std::cout << "\e[0m  ";
-				if (diff.count(it->second) != 0) {
+				if (diff.count(*it) != 0) {
 					std::cout << "\e[33m";
 					m++;
 				}
 				std::cout << std::flush;
-				it->second.dump(verbose != 0);
+				it->dump(verbose != 0);
 				if (verbose == 2) {
 					// refs
 					bool header = false;
-					for (const auto raddress : it->second.refs) {
+					for (const auto raddress : it->refs) {
 						std::cout << (!header ? "      using " : "            ");
 						header = true;
 						auto rsym = b->bean.get(raddress);
@@ -90,7 +92,7 @@ int main(int argc, const char *argv[]) {
 					}
 					// deps
 					header = false;
-					for (const auto daddress : it->second.deps) {
+					for (const auto daddress : it->deps) {
 						std::cout << (!header ? "    used by " : "            ");
 						header = true;
 						auto dsym = b->bean.get(daddress);

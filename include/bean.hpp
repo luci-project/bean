@@ -4,7 +4,7 @@
 
 #include <algorithm>
 #include <unordered_set>
-#include <map>
+#include <set>
 #include <vector>
 
 #include <capstone/capstone.h>
@@ -17,45 +17,43 @@ struct Bean {
 		uintptr_t address;
 
 		/*! \brief Size */
-		size_t size;
+		mutable size_t size;
 
 		/*! \brief Symbol name (for debugging) */
-		const char * name;
+		mutable const char * name;
 
 		// ToDo: Version?
 
 		/*! \brief Identifier based on instructions (without refs) */
-		uint64_t id;
+		mutable uint64_t id;
 
 		/*! \brief Refs identifier */
-		uint64_t id_ref;
+		mutable uint64_t id_ref;
 
-		/*! \brief Symbol ids using this symbol */
-		std::unordered_set<uintptr_t> deps;
+		/*! \brief Symbol ids using this symbol
+		 * \note vector (instead of unordered_set) due to performance
+		 */
+		mutable std::vector<uintptr_t> deps;
 
 		/*! \brief Reference of used symbols */
-		std::vector<uintptr_t> refs;
+		mutable std::vector<uintptr_t> refs;
 
 		Symbol(uintptr_t address, size_t size, const char * name = nullptr) : address(address), size(size), name(name), id(0), id_ref(0) {}
 
-		void merge(uintptr_t address, size_t size, const char * name = nullptr) {
-			if (address < this->address)
-				this->address = address;
-			this->size = std::max(this->address + this->size, address + size) - this->address;
-			if (this->name == nullptr)
-				this->name = name;
-			this->id = 0;
-		}
-
-		void merge(const Symbol & other) {
-			merge(other.address, other.size, other.name);
-			if (other.refs.size() > 0)
-				refs.insert(refs.end(), other.refs.begin(), other.refs.end());
-		}
-
-		void ref(uintptr_t to) {
+		void ref(uintptr_t to) const {
+			// only external references
 			if (to < address || to >= address + size)
 				refs.push_back(to);
+		}
+
+		bool dep(uintptr_t from) const {
+			// only add once
+			if (std::find(deps.begin(), deps.end(), from) == deps.end()) {
+				deps.push_back(from);
+				return true;
+			} else {
+				return false;
+			}
 		}
 
 		static void dump_header() {
@@ -73,6 +71,19 @@ struct Bean {
 		bool operator==(const Symbol & that) const {
 			return this->id == that.id && this->id_ref == that.id_ref && this->refs.size() == that.refs.size() && this->deps.size() == that.deps.size();
 		}
+
+	};
+
+	struct SymbolSort {
+		using is_transparent = void;
+
+		bool operator()(const Symbol & lhs, const Symbol & rhs) const { return lhs.address > rhs.address; }
+		bool operator()(uintptr_t lhs, const Symbol & rhs) const { return lhs > rhs.address; }
+		bool operator()(const Symbol & lhs, uintptr_t rhs) const { return lhs.address > rhs; }
+
+		bool operator()(const Elf::Section & lhs, const Elf::Section & rhs) const { return lhs.virt_addr() > rhs.virt_addr(); }
+		bool operator()(const Symbol & lhs, const Elf::Section & rhs) const { return lhs.address > rhs.virt_addr(); }
+		bool operator()(const Elf::Section & lhs, const Symbol & rhs) const { return lhs.virt_addr() > rhs.address; }
 	};
 
 	class SymbolHash {
@@ -82,61 +93,71 @@ struct Bean {
 		}
 	};
 
-	typedef std::unordered_set<Symbol, SymbolHash> symbols_t;
+	typedef std::unordered_set<Symbol, SymbolHash> symhash_t;
+	typedef std::set<Symbol, SymbolSort> symsort_t;
 
 	const Elf & elf;
-	const std::map<uintptr_t, Symbol> symbols;
+	const symsort_t symbols;
 
 	Bean(const Elf & elf) : elf(elf), symbols(analyze(elf)) {}
 
 	void dump(bool verbose = false) const {
-		if (verbose)
-			Symbol::dump_header();
-		for (auto & symbol_node : symbols)
-			symbol_node.second.dump(verbose);
+		dump(symbols, verbose);
 	}
 
-	static void dump(const symbols_t & symbols, bool verbose = false) {
+	static void dump(const symsort_t & symbols, bool verbose = false) {
 		if (verbose)
 			Symbol::dump_header();
-		for (auto & sym: symbols)
-			sym.dump(verbose);
+		for (auto it = symbols.rbegin(); it != symbols.rend(); ++it)
+			it->dump(verbose);
 	}
 
-	const symbols_t hashset() const {
-		symbols_t symbolset;
-		for (auto & symbol_node : symbols) {
-			auto & sym = symbol_node.second;
-			symbolset.insert(sym);
+	static void dump(const symhash_t & symbols, bool verbose = false) {
+		if (verbose) {
+			// Sort output by address
+			dump(symsort_t(symbols.begin(), symbols.end()), verbose);
+		} else {
+			// unsorted
+			for (auto & sym: symbols)
+				sym.dump(verbose);
 		}
-		return symbolset;
 	}
 
-	const symbols_t diff(const symbols_t & other_symbols, bool include_dependencies = false) const {
-		symbols_t result;
-		for (const auto & symbol_node : symbols) {
-			auto & sym = symbol_node.second;
+	const symhash_t diff(const symhash_t & other_symbols, bool include_dependencies = false) const {
+		symhash_t result;
+		for (const auto & sym : symbols)
 			if (other_symbols.count(sym) == 0 && result.insert(sym).second && include_dependencies)
 				for (const auto d: sym.deps)
 					dependencies(d, result);
-		}
 		return result;
 	}
 
-	const symbols_t diff(const Bean & other, bool include_dependencies = false) const {
-		return diff(other.hashset(), include_dependencies);
+	const symhash_t diff(const Bean & other, bool include_dependencies = false) const {
+		return diff(symhash_t(other.symbols.begin(), other.symbols.end()), include_dependencies);
 	}
 
-	const Symbol * get(uintptr_t address) {
-		auto sym = symbols.lower_bound(~address);
-		return sym != symbols.end() && address < sym->second.address + sym->second.size ? &(sym->second) : nullptr;
+	const Symbol * get(uintptr_t address)  const  {
+		auto sym = symbols.lower_bound(address);
+		return sym != symbols.end() && address < sym->address + sym->size ? &(*sym) : nullptr;
+	}
+
+	auto find(uintptr_t address = 0) const {
+		return std::make_reverse_iterator(symbols.upper_bound(address));
+	}
+
+	auto begin() const {
+		return symbols.rbegin();
+	}
+
+	auto end() const {
+		return symbols.rend();
 	}
 
  private:
-	void dependencies(uintptr_t address, symbols_t & result) const {
-		auto sym = symbols.lower_bound(~address);
-		if (sym != symbols.end() && result.insert(sym->second).second)
-			for (const auto d: sym->second.deps)
+	void dependencies(uintptr_t address, symhash_t & result) const {
+		auto sym = symbols.lower_bound(address);
+		if (sym != symbols.end() && result.insert(*sym).second)
+			for (const auto d: sym->deps)
 				dependencies(d, result);
 	}
 
@@ -177,36 +198,36 @@ struct Bean {
 		}
 	}
 
-	static void insert(std::map<uintptr_t, Symbol> & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
-		auto pos = symbols.find(~address);
-		if (pos == symbols.end())
-			symbols.emplace_hint(pos, ~address, Symbol{address, size, name});
-		else
-			pos->second.merge(address, size, name);
-	}
-/*
-	void merge(std::map<uintptr_t, Symbol>::iterator & pos, uintptr_t address, size_t size = 0, const char * name = nullptr) {
+	static void insert(symsort_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
+		auto pos = symbols.find(address);
 		if (pos == symbols.end()) {
-			symbols.emplace_hint(pos, ~address, Symbol{address, size, name});
-		} else if (address < pos->second.address) {
-			auto sym = symbols.extract(pos);
-			sym.mapped().merge(address, size, name);
-			sym.key() = ~address;
-			symbols.insert(std::move(sym));
+			symbols.insert(Symbol{address, size, name});
 		} else {
-			pos->second.merge(address, size, name);
+			const auto max_address = std::max(pos->address + pos->size, address + size);
+			bool new_name = name != nullptr &&  (pos->name == nullptr || pos->name[0] == '\0');
+			if (address < pos->address) {
+				auto sym = symbols.extract(pos);
+				sym.value().address = address;
+				sym.value().size = max_address - address;
+				if (new_name)
+					sym.value().name = name;
+				symbols.insert(std::move(sym));
+			} else {
+				pos->size = max_address - pos->address;
+				if (new_name)
+					pos->name = name;
+			}
 		}
 	}
-*/
 
-	static std::map<uintptr_t, Symbol> analyze(const Elf &elf) {
-		std::map<uintptr_t, Symbol> symbols;
-		std::map<uintptr_t, Elf::Section> sections;
+	static symsort_t analyze(const Elf &elf) {
+		symsort_t symbols;
+		std::set<Elf::Section, SymbolSort> sections;
 
 		// 1. Read symbols and segments
 		for (const auto & section: elf.sections) {
 			if (section.allocate())
-				sections.insert(std::make_pair(~section.virt_addr(), section));
+				sections.insert(section);
 			switch(section.type()) {
 				// TODO: Read relocations, since they need to be compared as well (especially undefined ones...)
 				case Elf::SHT_REL:
@@ -248,8 +269,7 @@ struct Bean {
 
 		// 2. Gather (additional) function start addresses by reading call-targets
 		//    if call target exists (from symtab)-> ignore
-		for (const auto & section_node : sections) {
-			const auto & section = section_node.second;
+		for (const auto & section : sections) {
 			if (section.executable()) {
 				const auto index = elf.sections.index(section);
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
@@ -276,26 +296,24 @@ struct Bean {
 
 		// 3. Disassemble again...
 		size_t last_addr = SIZE_MAX;
-		for (auto & symbol_node : symbols) {
-			auto & sym = symbol_node.second;
-			const auto section_node = sections.lower_bound(symbol_node.first);
-			assert(section_node != sections.end());
-			const auto & section = section_node->second;
+		for (auto & sym : symbols) {
+			const auto section = sections.lower_bound(sym);
+			assert(section != sections.end());
 
 			// 3a. calculate size (if 0), TODO: ignore nops!
-			const size_t max_addr = std::min(last_addr, section.virt_addr() + section.size());
+			const size_t max_addr = std::min(last_addr, section->virt_addr() + section->size());
 			uintptr_t address = sym.address;
 			assert(max_addr >= address);
-			const size_t max_size = max_addr - address - 1;
+			const size_t max_size = max_addr - address;
 			if (max_size > sym.size)
 				sym.size = max_size;
 
 			// 3b. generate links (from jmp + call) & hash
-			const size_t offset = address - section.virt_addr();
-			const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data()) + offset;
+			const size_t offset = address - section->virt_addr();
+			const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
 			XXHash64 id(0);  // TODO seed
-			if (section.executable()) {
-				size_t size = sym.size;
+			if (section->executable()) {
+				size_t size = sym.size - 1;
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
 					if (insn->id == X86_INS_NOP)
 						continue;
@@ -329,7 +347,7 @@ struct Bean {
 			} else {
 				// Non-executable objects will be fully hashed
 				// TODO: Relocations
-				if (section.type() != Elf::SHT_NOBITS)
+				if (section->type() != Elf::SHT_NOBITS)
 					id.add(data, sym.size);
 			}
 
@@ -340,18 +358,16 @@ struct Bean {
 		cs_free(insn, 1);
 
 		// 4. Calculate full id, set dependencies and add to final set
-		for (auto & symbol_node : symbols) {
-			auto & sym = symbol_node.second;
-
+		for (auto & sym : symbols) {
 			if (sym.refs.size() > 0) {
 				XXHash64 id_ref(0);  // TODO seed
 				for (const auto ref : sym.refs) {
-					auto ref_sym = symbols.lower_bound(~ref);
+					auto ref_sym = symbols.lower_bound(ref);
 					if (ref_sym != symbols.end()) {
 						// Hash ID and offset
-						const uint64_t r[2] = { ref_sym->second.id, ref - ref_sym->second.address};
+						const uint64_t r[2] = { ref_sym->id, ref - ref_sym->address};
 						id_ref.add(r, 2 * sizeof(uint64_t));
-						ref_sym->second.deps.insert(sym.address);
+						ref_sym->dep(sym.address);
 					} else {
 						// TODO
 					}
