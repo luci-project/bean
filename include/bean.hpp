@@ -36,10 +36,7 @@ struct Bean {
 		/*! \brief Reference of used symbols */
 		std::vector<uintptr_t> refs;
 
-		/*! \brief Do unresolved references exist? */
-		bool refs_unresolved;
-
-		Symbol(uintptr_t address, size_t size, const char * name = nullptr) : address(address), size(size), name(name), id(0), id_ref(0), refs_unresolved(false) {}
+		Symbol(uintptr_t address, size_t size, const char * name = nullptr) : address(address), size(size), name(name), id(0), id_ref(0) {}
 
 		void merge(uintptr_t address, size_t size, const char * name = nullptr) {
 			if (address < this->address)
@@ -128,6 +125,11 @@ struct Bean {
 
 	const symbols_t diff(const Bean & other, bool include_dependencies = false) const {
 		return diff(other.hashset(), include_dependencies);
+	}
+
+	const Symbol * get(uintptr_t address) {
+		auto sym = symbols.lower_bound(~address);
+		return sym != symbols.end() && address < sym->second.address + sym->second.size ? &(sym->second) : nullptr;
 	}
 
  private:
@@ -284,7 +286,7 @@ struct Bean {
 			const size_t max_addr = std::min(last_addr, section.virt_addr() + section.size());
 			uintptr_t address = sym.address;
 			assert(max_addr >= address);
-			const size_t max_size = max_addr - address;
+			const size_t max_size = max_addr - address - 1;
 			if (max_size > sym.size)
 				sym.size = max_size;
 
@@ -295,6 +297,9 @@ struct Bean {
 			if (section.executable()) {
 				size_t size = sym.size;
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
+					if (insn->id == X86_INS_NOP)
+						continue;
+
 					auto & detail_x86 = insn->detail->x86;
 					// Prefix, opcode, rex, addr_size, modrm, sib
 					id.add(&(detail_x86), 12);
@@ -315,7 +320,6 @@ struct Bean {
 								if (op.mem.base == X86_REG_RIP) {
 									sym.ref(insn->address + insn->size + op.mem.disp);
 								} else {
-									// unresolved?
 									id.add(&(op.mem), sizeof(x86_op_mem));
 								}
 								break;
@@ -325,7 +329,8 @@ struct Bean {
 			} else {
 				// Non-executable objects will be fully hashed
 				// TODO: Relocations
-				id.add(data, sym.size);
+				if (section.type() != Elf::SHT_NOBITS)
+					id.add(data, sym.size);
 			}
 
 			sym.id = id.hash();

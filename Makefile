@@ -1,5 +1,5 @@
 DEPDIR := .deps
-CXXFLAGS = -std=c++2a -MT $@ -MMD -MP -MF $(DEPDIR)/$@.d -Og -g -I include -I elfo/include/ -I xxhash/ -I capstone/include/
+CXXFLAGS = -std=c++2a -MT $@ -MMD -MP -MF $(DEPDIR)/$@.d -O3 -g -I include -I elfo/include/ -I xxhash/ -I capstone/include/
 LIBCAPSTONE = capstone/libcapstone.a
 LDFLAGS = -lcapstone -Lcapstone
 SOURCES := $(wildcard src/*.cpp)
@@ -13,7 +13,8 @@ all: $(TARGETS)
 
 $(LIBCAPSTONE):
 	git submodule update --init
-	$(MAKE) CAPSTONE_DIET=yes CAPSTONE_ARCHS="x86" -C capstone -j 4
+	#$(MAKE) CAPSTONE_DIET=yes CAPSTONE_ARCHS="x86" -C capstone -j 4
+	$(MAKE) CAPSTONE_DIET=no CAPSTONE_ARCHS="x86" -C capstone -j 4
 
 $(DEPDIR): ; @mkdir -p $@
 

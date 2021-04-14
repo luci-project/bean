@@ -9,7 +9,7 @@ struct SymbolSort {
 };
 
 int main(int argc, const char *argv[]) {
-	bool verbose = false;
+	unsigned verbose = 0;
 	bool dependencies = false;
 	bool sections = false;
 	BeanFile * a = nullptr;
@@ -17,7 +17,9 @@ int main(int argc, const char *argv[]) {
 	for (int i = 1; i < argc; i++) {
 		const std::string arg(argv[i]);
 		if (arg == "-v")
-			verbose = true;
+			verbose = 1;
+		else if (arg == "-vv")
+			verbose = 2;
 		else if (arg == "-d")
 			dependencies = true;
 		else if (arg == "-s")
@@ -32,7 +34,7 @@ int main(int argc, const char *argv[]) {
 
 	if (b == nullptr) {
 		delete a;
-		std::cerr << "Usage: " << argv[0] << "[-v] [-d] FIRST SECOND" << std::endl;
+		std::cerr << "Usage: " << argv[0] << "[-v[v]] [-d] FIRST SECOND" << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -66,7 +68,44 @@ int main(int argc, const char *argv[]) {
 					m++;
 				}
 				std::cout << std::flush;
-				it->second.dump(verbose);
+				it->second.dump(verbose != 0);
+				if (verbose == 2) {
+					// refs
+					bool header = false;
+					for (const auto raddress : it->second.refs) {
+						std::cout << (!header ? "      using " : "            ");
+						header = true;
+						auto rsym = b->bean.get(raddress);
+
+						if (rsym == nullptr) {
+							std::cout << "0x" << std::hex << raddress << std::dec << " [unresolved]";
+						} else {
+							std::cout << "0x" << std::hex << rsym->address << std::dec;
+							if (raddress != rsym->address)
+								std::cout << " + " << (raddress - rsym->address);
+							if (rsym->name != nullptr)
+								std::cout << " (" << rsym->name << ")";
+						}
+						std::cout << std::endl;
+					}
+					// deps
+					header = false;
+					for (const auto daddress : it->second.deps) {
+						std::cout << (!header ? "    used by " : "            ");
+						header = true;
+						auto dsym = b->bean.get(daddress);
+
+						if (dsym == nullptr) {
+							std::cout << "0x" << std::hex << daddress << std::dec << " [unresolved]";
+						} else {
+							std::cout << "0x" << std::hex << dsym->address << std::dec;
+							if (dsym->name != nullptr)
+								std::cout << " (" << dsym->name << ")";
+						}
+						std::cout << std::endl;
+					}
+					std::cout << std::endl;
+				}
 				i++;
 			}
 
@@ -76,7 +115,7 @@ int main(int argc, const char *argv[]) {
 			std::cout << ")" << std::endl << std::endl;
 		}
 	} else {
-		Bean::dump(diff, verbose);
+		Bean::dump(diff, verbose != 0);
 	}
 
 	delete a;
