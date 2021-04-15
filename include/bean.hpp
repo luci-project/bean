@@ -9,6 +9,7 @@
 
 #include <capstone/capstone.h>
 #include "elf.hpp"
+#include "elf_rel.hpp"
 #include "xxhash64.h"
 
 struct Bean {
@@ -21,8 +22,6 @@ struct Bean {
 
 		/*! \brief Symbol name (for debugging) */
 		mutable const char * name;
-
-		// ToDo: Version?
 
 		/*! \brief Identifier based on instructions (without refs) */
 		mutable uint64_t id;
@@ -71,7 +70,6 @@ struct Bean {
 		bool operator==(const Symbol & that) const {
 			return this->id == that.id && this->id_ref == that.id_ref && this->refs.size() == that.refs.size() && this->deps.size() == that.deps.size();
 		}
-
 	};
 
 	struct SymbolSort {
@@ -93,8 +91,17 @@ struct Bean {
 		}
 	};
 
+	struct RelocationSort {
+		using is_transparent = void;
+
+		bool operator()(const Relocation & lhs, const Relocation & rhs) const { return lhs.offset > rhs.offset; }
+		bool operator()(uintptr_t lhs, const Relocation & rhs) const { return lhs > rhs.offset; }
+		bool operator()(const Relocation & lhs, uintptr_t rhs) const { return lhs.offset > rhs; }
+	};
+
 	typedef std::unordered_set<Symbol, SymbolHash> symhash_t;
 	typedef std::set<Symbol, SymbolSort> symsort_t;
+	typedef std::set<Relocation, RelocationSort> reloc_t;
 	typedef std::vector<std::pair<uintptr_t, size_t>> memarea_t;
 
 	const Elf & elf;
@@ -231,7 +238,7 @@ struct Bean {
 		}
 	}
 
-	static void insert(symsort_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
+	static void insert_symbol(symsort_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
 		auto pos = symbols.find(address);
 		if (pos == symbols.end()) {
 			symbols.insert(Symbol{address, size, name});
@@ -253,9 +260,11 @@ struct Bean {
 		}
 	}
 
+
 	static symsort_t analyze(const Elf &elf) {
 		symsort_t symbols;
 		std::set<Elf::Section, SymbolSort> sections;
+		reloc_t relocations;
 
 		// 1. Read symbols and segments
 		for (const auto & section: elf.sections) {
@@ -264,10 +273,12 @@ struct Bean {
 			switch(section.type()) {
 				// TODO: Read relocations, since they need to be compared as well (especially undefined ones...)
 				case Elf::SHT_REL:
-					// TODO: relocations<typename Elf::Relocation>(section);
+					for (const auto & entry : section.get_array<Elf::Relocation>())
+						relocations.emplace(entry);
 					break;
 				case Elf::SHT_RELA:
-					// TODO: relocations<typename Elf::RelocationWithAddend>(section);
+					for (const auto & entry : section.get_array<Elf::RelocationWithAddend>())
+						relocations.emplace(entry);
 					break;
 
 				case Elf::SHT_SYMTAB:
@@ -284,7 +295,7 @@ struct Bean {
 								assert(sym.value() >= elf.sections[sym.section_index()].virt_addr());
 								assert(sym.value() + sym.size() <= elf.sections[sym.section_index()].virt_addr() + elf.sections[sym.section_index()].size());
 								if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
-									insert(symbols, sym.value(), sym.size(), sym.name());
+									insert_symbol(symbols, sym.value(), sym.size(), sym.name());
 						}
 					break;
 
@@ -292,12 +303,12 @@ struct Bean {
 					continue;
 			}
 		}
-		// Prepare disassembly
+
+		// Prepare disassemble
 		csh cshandle;
 		if (::cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) != CS_ERR_OK) // todo: depending on ELF
 			return {};
 		::cs_option(cshandle, CS_OPT_DETAIL, CS_OPT_ON);
-
 		cs_insn *insn = cs_malloc(cshandle);
 
 		// 2. Gather (additional) function start addresses by reading call-targets
@@ -307,7 +318,7 @@ struct Bean {
 				const auto index = elf.sections.index(section);
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
 				uintptr_t address = section.virt_addr();
-				insert(symbols, address, 0, section.name());
+				insert_symbol(symbols, address, 0, section.name());
 
 				size_t size = section.size();
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
@@ -316,10 +327,10 @@ struct Bean {
 							auto & detail_x86 = insn->detail->x86;
 							auto & op = detail_x86.operands[detail_x86.op_count - 1];
 							if (op.type == X86_OP_IMM)
-								insert(symbols, op.imm);
+								insert_symbol(symbols, op.imm);
 							else if (op.type == X86_OP_MEM && op.mem.base == X86_REG_RIP) {
 								// Ignore segment, index, scale
-								insert(symbols, insn->address + insn->size + op.mem.disp);
+								insert_symbol(symbols, insn->address + insn->size + op.mem.disp);
 							}
 						}
 					}
