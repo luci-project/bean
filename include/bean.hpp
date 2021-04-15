@@ -95,6 +95,7 @@ struct Bean {
 
 	typedef std::unordered_set<Symbol, SymbolHash> symhash_t;
 	typedef std::set<Symbol, SymbolSort> symsort_t;
+	typedef std::vector<std::pair<uintptr_t, size_t>> memarea_t;
 
 	const Elf & elf;
 	const symsort_t symbols;
@@ -121,6 +122,38 @@ struct Bean {
 			for (auto & sym: symbols)
 				sym.dump(verbose);
 		}
+	}
+
+	/*! \brief Merge memory areas */
+	const memarea_t merge(const symsort_t & symbols, size_t threshold = 0) const {
+		memarea_t area;
+		for (auto it = symbols.rbegin(); it != symbols.rend(); ++it) {
+			if (!area.empty()) {
+				const auto & address = area.back().first;
+				auto & size = area.back().second;
+				if (address + size + threshold >= it->address) {
+					size = it->address + it->size - address;
+					continue;
+				}
+			}
+			area.emplace_back(it->address, it->size);
+		}
+		return area;
+	}
+
+	/*! \brief Merge memory areas
+	 * \note ids and names will be removed
+	 */
+	const memarea_t merge(const symhash_t & symbols, size_t threshold = 0) const {
+		return merge(symsort_t(symbols.begin(), symbols.end()), threshold);
+	}
+
+	const memarea_t diffmerge(const symhash_t & other_symbols, bool include_dependencies = false, size_t threshold = 0) const {
+		return merge(diff(other_symbols, include_dependencies), threshold);
+	}
+
+	const memarea_t diffmerge(const Bean & other, bool include_dependencies = false, size_t threshold = 0) const {
+		return merge(diff(other, include_dependencies), threshold);
 	}
 
 	const symhash_t diff(const symhash_t & other_symbols, bool include_dependencies = false) const {

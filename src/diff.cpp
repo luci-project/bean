@@ -4,10 +4,6 @@
 
 #include "beanfile.hpp"
 
-struct SymbolSort {
-	bool operator()(const Bean::Symbol & a, const Bean::Symbol & b) const { return a.address < b.address; }
-};
-
 int main(int argc, const char *argv[]) {
 	unsigned verbose = 0;
 	bool dependencies = false;
@@ -34,7 +30,7 @@ int main(int argc, const char *argv[]) {
 
 	if (b == nullptr) {
 		delete a;
-		std::cerr << "Usage: " << argv[0] << "[-v[v]] [-d] FIRST SECOND" << std::endl;
+		std::cerr << "Usage: " << argv[0] << "[-v[v]] [-d] [-s] OLD NEW" << std::endl;
 		return EXIT_FAILURE;
 	}
 
