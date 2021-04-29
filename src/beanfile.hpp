@@ -23,13 +23,13 @@ struct BeanFile {
 
 	Bean bean;
 
-	BeanFile(const char * path)
+	BeanFile(const char * path, bool resolve_relocations = true, bool explain = false)
 	  : path(path),
 	    fd(open_file()),
 	    size(get_size()),
 	    addr(map_memory()),
 	    elf(read_elf()),
-	    bean(elf) {}
+	    bean(elf, resolve_relocations, explain) {}
 
 	~BeanFile() {
 		// Cleanup

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdio>
+#include <cstring>
 
 #include <algorithm>
 #include <unordered_set>
@@ -82,6 +83,12 @@ struct Bean {
 		bool operator()(const Elf::Section & lhs, const Elf::Section & rhs) const { return lhs.virt_addr() > rhs.virt_addr(); }
 		bool operator()(const Symbol & lhs, const Elf::Section & rhs) const { return lhs.address > rhs.virt_addr(); }
 		bool operator()(const Elf::Section & lhs, const Symbol & rhs) const { return lhs.virt_addr() > rhs.address; }
+
+		bool operator()(const Elf::Relocation & lhs, const Elf::Relocation & rhs) const { return lhs.offset() > rhs.offset(); }
+		bool operator()(const Symbol & lhs, const Elf::Relocation & rhs) const { return lhs.address > rhs.offset(); }
+		bool operator()(const Elf::Relocation & lhs, const Symbol & rhs) const { return lhs.offset() > rhs.address; }
+		bool operator()(uintptr_t lhs, const Elf::Relocation & rhs) const { return lhs > rhs.offset(); }
+		bool operator()(const Elf::Relocation & lhs, uintptr_t rhs) const { return lhs.offset() > rhs; }
 	};
 
 	class SymbolHash {
@@ -91,23 +98,14 @@ struct Bean {
 		}
 	};
 
-	struct RelocationSort {
-		using is_transparent = void;
-
-		bool operator()(const Relocation & lhs, const Relocation & rhs) const { return lhs.offset > rhs.offset; }
-		bool operator()(uintptr_t lhs, const Relocation & rhs) const { return lhs > rhs.offset; }
-		bool operator()(const Relocation & lhs, uintptr_t rhs) const { return lhs.offset > rhs; }
-	};
-
 	typedef std::unordered_set<Symbol, SymbolHash> symhash_t;
 	typedef std::set<Symbol, SymbolSort> symsort_t;
-	typedef std::set<Relocation, RelocationSort> reloc_t;
 	typedef std::vector<std::pair<uintptr_t, size_t>> memarea_t;
 
 	const Elf & elf;
 	const symsort_t symbols;
 
-	Bean(const Elf & elf) : elf(elf), symbols(analyze(elf)) {}
+	Bean(const Elf & elf, bool resolve_relocations = true, bool explain = false) : elf(elf), symbols(analyze(elf, resolve_relocations, explain)) {}
 
 	void dump(bool verbose = false) const {
 		dump(symbols, verbose);
@@ -194,6 +192,26 @@ struct Bean {
 	}
 
  private:
+	template<int SIZE>
+	struct ByteBuffer {
+		uint8_t buffer[SIZE];
+		size_t size;
+
+		ByteBuffer() : size(0) {}
+
+		template<typename T>
+		size_t push(const T & v) {
+			assert(size + sizeof(T) < SIZE);
+			*reinterpret_cast<T *>(buffer + size) = v;
+			size += sizeof(T);
+			return sizeof(T);
+		}
+
+		void clear() {
+			size = 0;
+		}
+	};
+
 	void dependencies(uintptr_t address, symhash_t & result) const {
 		auto sym = symbols.lower_bound(address);
 		if (sym != symbols.end() && result.insert(*sym).second)
@@ -261,10 +279,10 @@ struct Bean {
 	}
 
 
-	static symsort_t analyze(const Elf &elf) {
+	static symsort_t analyze(const Elf &elf, bool resolve_relocations, bool explain) {
 		symsort_t symbols;
 		std::set<Elf::Section, SymbolSort> sections;
-		reloc_t relocations;
+		std::set<Elf::Relocation, SymbolSort> relocations;
 
 		// 1. Read symbols and segments
 		for (const auto & section: elf.sections) {
@@ -273,11 +291,8 @@ struct Bean {
 			switch(section.type()) {
 				// TODO: Read relocations, since they need to be compared as well (especially undefined ones...)
 				case Elf::SHT_REL:
-					for (const auto & entry : section.get_array<Elf::Relocation>())
-						relocations.emplace(entry);
-					break;
 				case Elf::SHT_RELA:
-					for (const auto & entry : section.get_array<Elf::RelocationWithAddend>())
+					for (const auto & entry : section.get_relocations())
 						relocations.emplace(entry);
 					break;
 
@@ -292,8 +307,10 @@ struct Bean {
 								break;
 
 							default:
-								assert(sym.value() >= elf.sections[sym.section_index()].virt_addr());
-								assert(sym.value() + sym.size() <= elf.sections[sym.section_index()].virt_addr() + elf.sections[sym.section_index()].size());
+								if (sym.type() != Elf::STT_NOTYPE) {
+									assert(sym.value() >= elf.sections[sym.section_index()].virt_addr());
+									assert(sym.value() + sym.size() <= elf.sections[sym.section_index()].virt_addr() + elf.sections[sym.section_index()].size());
+								}
 								if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
 									insert_symbol(symbols, sym.value(), sym.size(), sym.name());
 						}
@@ -302,6 +319,11 @@ struct Bean {
 				default:
 					continue;
 			}
+		}
+
+		const size_t elf_symbols = symbols.size();
+		if (explain) {
+			printf("\e[3mElf contains %ld sections with definitions of %ld unqiue symbols and %ld relocations\e[0m\n", sections.size(), elf_symbols, relocations.size());
 		}
 
 		// Prepare disassemble
@@ -338,8 +360,13 @@ struct Bean {
 			}
 		}
 
+		if (explain) {
+			printf("\e[3mFound %ld unqiue symbols in machine code (+%ld compared to definition)\e[0m\n", symbols.size(), (symbols.size() - elf_symbols));
+		}
+
 		// 3. Disassemble again...
 		size_t last_addr = SIZE_MAX;
+		ByteBuffer<128> hashbuf;
 		for (auto & sym : symbols) {
 			const auto section = sections.lower_bound(sym);
 			assert(section != sections.end());
@@ -352,6 +379,10 @@ struct Bean {
 			if (max_size > sym.size)
 				sym.size = max_size;
 
+			if (explain) {
+				printf("\n\e[1m%s\e[0m (%s, %lu bytes)\n", sym.name, section->name(), sym.size);
+			}
+
 			// 3b. generate links (from jmp + call) & hash
 			const size_t offset = address - section->virt_addr();
 			const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
@@ -362,35 +393,139 @@ struct Bean {
 					if (insn->id == X86_INS_NOP)
 						continue;
 
+					// Buffer for id hash
+					hashbuf.clear();
+					hashbuf.push(insn->id);  // Instruction ID (Idea: Different call instructions are no issue for comparison - TODO: Is this sufficient)
+
 					auto & detail_x86 = insn->detail->x86;
-					// Prefix, opcode, rex, addr_size, modrm, sib
-					id.add(&(detail_x86), 12);
-					// TODO: Relocations
+					// Check Prefix bytes
+					size_t prefix_size = 0;
+					for (int p = 0; p < 4; p++)
+						if (detail_x86.prefix[p] == 0)
+							break;
+						else
+							prefix_size += hashbuf.push(detail_x86.prefix[p]);
+
+					// Has REX prefix? (do not has, since it only affects ops)
+					if (detail_x86.rex != 0)
+						prefix_size++;
+
+					// Check Opcode bytes
+					size_t opcode_size = 0;
+					for (int o = 0; o < 4; o++)
+						if (detail_x86.opcode[o] == 0)
+							break;
+						else
+							opcode_size += hashbuf.push(detail_x86.opcode[o]);
+
+					// Handle relocations
+					const auto relocation = relocations.lower_bound(sym);
+					bool relocation_operand[2] = {false, false};
+					int rel_start = 0;
+					int rel_end = 0;
+					const char * rel_name = nullptr;
+					if (relocation != relocations.end() && relocation->offset() < insn->address + insn->size) {
+						const auto relocator = Relocator(*relocation);
+						const auto rel_off = relocation->offset();
+						const auto rel_size = relocator.size();
+						rel_start = relocation->offset() - insn->address;
+						rel_end = rel_start + rel_size;
+						//assert(rel_off + rel_size <= insn->address + insn->size);
+
+						if (relocation->symbol_index() == 0) { // TODO: Handling at resolve_relocations
+							// No Symbol - calculate target value and add as reference
+							sym.ref(relocator.value(0));
+							rel_name = "[fixed]";
+						} else {
+							// Hash relocation type and addend
+							hashbuf.push(relocation->type());
+							hashbuf.push(relocation->addend());
+							// Get relocation symbol
+							const auto rel_sym = relocation->symbol();
+							rel_name = rel_sym.name();
+							if (!resolve_relocations || rel_sym.section_index() == Elf::SHN_UNDEF) {
+								// hash symbol name
+								id.add(rel_sym.name(), strlen(rel_sym.name()));
+							} else {
+								// Add as reference -- TODO: Handle weak symbols
+								sym.ref(rel_sym.value());
+							}
+						}
+
+						// Memory should be zero for hash
+						for (int i = 0; i < rel_size; i++) {
+							assert(*(data - insn->size + (rel_off - insn->address) + i) == 0);
+						}
+
+						// Find affected operand (we only support one or two for relocation)
+						assert(detail_x86.op_count > 0 && detail_x86.op_count <= 2);
+						size_t op = detail_x86.op_count == 2 ? 1 : 0;
+						relocation_operand[op] = rel_off + rel_size == insn->address + insn->size;
+						relocation_operand[1 - op] = !relocation_operand[op];
+					}
+
+					if (explain) {
+						printf("0x%016lx", insn->address);
+						for (int i = 0; i < 12; i++) {
+							if (i < insn->size) {
+								if (i >= rel_start && i < rel_end)
+									printf("\e[35m");
+								else if (i < prefix_size)
+									printf("\e[34;3m");
+								else if (i < prefix_size + opcode_size)
+									printf("\e[34m");
+								else
+									printf("\e[36m");
+								printf(" %02x\e[0m", insn->bytes[i]);
+							} else {
+								printf("   ");
+							}
+						}
+						printf("\e[34m%s\e[0m \e[36m%s\e[0m", insn->mnemonic, insn->op_str);
+						if (rel_name != nullptr)
+							printf("\e[35m-> %s\e[0m", rel_name);
+						printf("\n");
+					}
+
+					// Handle operands
 					for (int o = 0; o < detail_x86.op_count; o++) {
+						bool has_relocation = o < 2 && relocation_operand[o];
 						auto & op = detail_x86.operands[o];
 						switch (op.type) {
 							case X86_OP_REG:
-								id.add(&(op.reg), sizeof(x86_reg));
+								assert(!has_relocation);
+								hashbuf.push(op.reg);
 								break;
+
 							case X86_OP_IMM:
-								if (branch_relative(insn->id))
+								if (has_relocation) {
+									// Skip
+								} else if (branch_relative(insn->id)) {
 									sym.ref(op.imm);
-								else
-									id.add(&(op.imm), sizeof(int64_t));
-								break;
-							case X86_OP_MEM:
-								if (op.mem.base == X86_REG_RIP) {
-									sym.ref(insn->address + insn->size + op.mem.disp);
 								} else {
-									id.add(&(op.mem), sizeof(x86_op_mem));
+									hashbuf.push(op.imm);
+								}
+								break;
+
+							case X86_OP_MEM:
+								// TODO: segment handling?
+								if (op.mem.base == X86_REG_RIP) {
+									if (!has_relocation)
+										sym.ref(insn->address + insn->size + op.mem.disp);
+								} else {
+									assert(!has_relocation);
+									hashbuf.push(op.mem);
 								}
 								break;
 						}
 					}
+
+					// add instruction hash buffer to hash
+					id.add(hashbuf.buffer, hashbuf.size);
 				}
 			} else {
 				// Non-executable objects will be fully hashed
-				// TODO: Relocations
+				// TODO: Relocations to sym.ref && assert that relocation contents are zero
 				if (section->type() != Elf::SHT_NOBITS)
 					id.add(data, sym.size);
 			}
