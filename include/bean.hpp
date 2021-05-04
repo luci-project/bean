@@ -105,7 +105,7 @@ struct Bean {
 	const Elf & elf;
 	const symsort_t symbols;
 
-	Bean(const Elf & elf, bool resolve_relocations = true, bool explain = false) : elf(elf), symbols(analyze(elf, resolve_relocations, explain)) {}
+	explicit Bean(const Elf & elf, bool resolve_relocations = true, bool explain = false) : elf(elf), symbols(analyze(elf, resolve_relocations, explain)) {}
 
 	void dump(bool verbose = false) const {
 		dump(symbols, verbose);
@@ -337,7 +337,6 @@ struct Bean {
 		//    if call target exists (from symtab)-> ignore
 		for (const auto & section : sections) {
 			if (section.executable()) {
-				const auto index = elf.sections.index(section);
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
 				uintptr_t address = section.virt_addr();
 				insert_symbol(symbols, address, 0, section.name());
@@ -421,8 +420,8 @@ struct Bean {
 					// Handle relocations
 					const auto relocation = relocations.lower_bound(sym);
 					bool relocation_operand[2] = {false, false};
-					int rel_start = 0;
-					int rel_end = 0;
+					size_t rel_start = 0;
+					size_t rel_end = 0;
 					const char * rel_name = nullptr;
 					if (relocation != relocations.end() && relocation->offset() < insn->address + insn->size) {
 						const auto relocator = Relocator(*relocation);
@@ -453,7 +452,7 @@ struct Bean {
 						}
 
 						// Memory should be zero for hash
-						for (int i = 0; i < rel_size; i++) {
+						for (size_t i = 0; i < rel_size; i++) {
 							assert(*(data - insn->size + (rel_off - insn->address) + i) == 0);
 						}
 
@@ -466,7 +465,7 @@ struct Bean {
 
 					if (explain) {
 						printf("0x%016lx", insn->address);
-						for (int i = 0; i < 12; i++) {
+						for (size_t i = 0; i < 12; i++) {
 							if (i < insn->size) {
 								if (i >= rel_start && i < rel_end)
 									printf("\e[35m");
@@ -516,6 +515,9 @@ struct Bean {
 									assert(!has_relocation);
 									hashbuf.push(op.mem);
 								}
+								break;
+
+							default:
 								break;
 						}
 					}
