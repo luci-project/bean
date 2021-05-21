@@ -8,6 +8,12 @@
 #include <set>
 #include <vector>
 
+#ifndef NOSTL
+#include <iostream>
+#include <iomanip>
+using namespace std;
+#endif
+
 #include <capstone/capstone.h>
 #include "elf.hpp"
 #include "elf_rel.hpp"
@@ -57,15 +63,19 @@ struct Bean {
 		}
 
 		static void dump_header() {
-			printf("ID               ID refs          [Ref / Dep] - Address             Size  Name\n");
+			cout << "ID               ID refs          [Ref / Dep] - Address             Size  Name" << endl;
 		}
 
 		void dump(bool verbose = false) const {
+			cout << setfill('0') << hex
+				 << setw(16) << id << ' '
+				 << setw(16) << id_ref
+				 << setfill(' ') << dec;
 			if (verbose)
-				//printf("%016lx %016lx [%3lu / %3lu] - 0x%016lx %6lu %s\n", id, id_ref, refs.size(), deps.size(), address, size, name);
-				printf("%016lx %016lx [%3lu / %3lu] - 0x%016lx %6lu %s\n", id, id_ref, refs.size(), deps.size(), address, size, name);
-			else
-				printf("%016lx %016lx\n", id, id_ref);
+				cout << " [" << refs.size() << " / " << deps.size() << "] - "
+				     << setfill('0') << hex << address << setfill(' ') << dec << ' '
+				     << size << ' ' << 	name;
+			cout << endl;
 		}
 
 		bool operator==(const Symbol & that) const {
@@ -322,13 +332,12 @@ struct Bean {
 		}
 
 		const size_t elf_symbols = symbols.size();
-		if (explain) {
-			printf("\e[3mElf contains %ld sections with definitions of %ld unqiue symbols and %ld relocations\e[0m\n", sections.size(), elf_symbols, relocations.size());
-		}
+		if (explain)
+			cout << "\e[3mElf contains " << sections.size() << " sections with definitions of " << elf_symbols << " unqiue symbols and " << relocations.size() << " relocations\e[0m" << endl;
 
 		// Prepare disassemble
 		csh cshandle;
-		if (::cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) != CS_ERR_OK) // todo: depending on ELF
+		if (::cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) != CS_ERR_OK)  // todo: depending on ELF
 			return {};
 		::cs_option(cshandle, CS_OPT_DETAIL, CS_OPT_ON);
 		cs_insn *insn = cs_malloc(cshandle);
@@ -359,9 +368,8 @@ struct Bean {
 			}
 		}
 
-		if (explain) {
-			printf("\e[3mFound %ld unqiue symbols in machine code (+%ld compared to definition)\e[0m\n", symbols.size(), (symbols.size() - elf_symbols));
-		}
+		if (explain)
+			cout << "\e[3mFound " << symbols.size() << " unqiue symbols in machine code (+" << (symbols.size() - elf_symbols) << " compared to definition)\e[0m" << endl;
 
 		// 3. Disassemble again...
 		size_t last_addr = SIZE_MAX;
@@ -378,9 +386,8 @@ struct Bean {
 			if (max_size > sym.size)
 				sym.size = max_size;
 
-			if (explain) {
-				printf("\n\e[1m%s\e[0m (%s, %lu bytes)\n", sym.name, section->name(), sym.size);
-			}
+			if (explain)
+				cout << endl << "\e[1m" << sym.name << "\e[0m (" << section->name() << ", " << sym.size << " bytes)" << endl;
 
 			// 3b. generate links (from jmp + call) & hash
 			const size_t offset = address - section->virt_addr();
@@ -464,26 +471,26 @@ struct Bean {
 					}
 
 					if (explain) {
-						printf("0x%016lx", insn->address);
+						cout << setfill('0') << setw(16) << hex << insn->address;
 						for (size_t i = 0; i < 12; i++) {
 							if (i < insn->size) {
 								if (i >= rel_start && i < rel_end)
-									printf("\e[35m");
+									cout << "\e[35m";
 								else if (i < prefix_size)
-									printf("\e[34;3m");
+									cout << "\e[34;3m";
 								else if (i < prefix_size + opcode_size)
-									printf("\e[34m");
+									cout << "\e[34m";
 								else
-									printf("\e[36m");
-								printf(" %02x\e[0m", insn->bytes[i]);
+									cout << "\e[36m";
+								cout << ' ' << setw(2) << insn->bytes[i] << "\e[0m";
 							} else {
-								printf("   ");
+								cout << "   ";
 							}
 						}
-						printf("\e[34m%s\e[0m \e[36m%s\e[0m", insn->mnemonic, insn->op_str);
+						cout << "\e[34m" << insn->mnemonic << "\e[0m \e[36m" << insn->op_str << "\e[0m";
 						if (rel_name != nullptr)
-							printf("\e[35m-> %s\e[0m", rel_name);
-						printf("\n");
+							cout << "\e[35m-> " << rel_name << "\e[0m";
+						cout << endl;
 					}
 
 					// Handle operands
