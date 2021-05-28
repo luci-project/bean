@@ -1,4 +1,5 @@
 .deps/
 hash
 diff
+diffmem
 *.old
