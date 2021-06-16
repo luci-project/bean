@@ -1,6 +1,7 @@
-#include <algorithm>
-#include <iterator>
-#include <cstdio>
+#include <dlh/container/vector.hpp>
+#include <dlh/stream/output.hpp>
+#include <dlh/parser/string.hpp>
+#include <dlh/string.hpp>
 
 #include "beanfile.hpp"
 
@@ -9,28 +10,36 @@ int main(int argc, const char *argv[]) {
 	BeanFile * a = nullptr;
 	BeanFile * b = nullptr;
 	size_t threshold = 0;
+
+	if (!BeanFile::init())
+		return EXIT_FAILURE;
+
+
 	for (int i = 1; i < argc; i++) {
-		const std::string arg(argv[i]);
-		if (arg == "-d")
+		if (strcmp(argv[i], "-d") == 0)
 			dependencies = true;
 		else if (a == nullptr)
 			a = new BeanFile(argv[i]);
 		else if (b == nullptr)
 			b = new BeanFile(argv[i]);
-		else if (threshold == 0)
-			threshold = atol(argv[i]);
+		else if (threshold == 0 && Parser::string(threshold, argv[i]))
+			continue;
 		else
-			printf("Ignoring argument %s\n", argv[i]);
+			cerr << "Ignoring argument " << argv[i] << endl;
 	}
 
 	if (b == nullptr) {
 		delete a;
-		printf("Usage: %s [-d] OLD NEW [THRESHOLD]\n", argv[0]);
+		cerr << "Usage: " << argv[0] << " [-d] OLD NEW [THRESHOLD]" << endl;
 		return EXIT_FAILURE;
 	}
 
+	cout << "# " << a->path << " (" << a->size << " bytes) -> "
+	             << b->path << " (" << b->size << " bytes)" << endl;
 	for (const auto & mem : b->bean.diffmerge(a->bean, dependencies, threshold)) {
-		printf("0x%016lx %6lu -> 0x%016lx\n", mem.first, mem.second, mem.first + mem.second);
+		cout << prefix << setw(16) << hex << mem.first
+		     << ' ' << setw(6) << dec << mem.second
+		     << " -> " << setw(16) << hex << (mem.first + mem.second) << endl;
 	}
 
 	delete a;

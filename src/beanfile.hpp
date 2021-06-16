@@ -1,17 +1,11 @@
 #pragma once
 
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <dlh/stream/buffer.hpp>
+#include <dlh/stream/output.hpp>
+#include <dlh/unistd.hpp>
+#include <dlh/alloc.hpp>
 
-#include <fcntl.h>
-#include <cstdio>
-#include <cstdlib>
-
-#include <iostream>
-#include <iomanip>
-
-#include "bean.hpp"
+#include <bean/bean.hpp>
 
 struct BeanFile {
 	const char * path;
@@ -35,6 +29,19 @@ struct BeanFile {
 		// Cleanup
 		::munmap(addr, size);
 		::close(fd);
+	}
+
+	static inline bool init() {
+		// Capstone (used by Bean) without libc
+		cs_opt_mem setup = {
+			.malloc = malloc,
+			.calloc = calloc,
+			.realloc = realloc,
+			.free = free,
+			.vsnprintf = vsnprintf
+		};
+
+		return ::cs_option(0, CS_OPT_MEM, reinterpret_cast<size_t>(&setup)) == 0;
 	}
 
  private:
@@ -73,18 +80,18 @@ struct BeanFile {
 	Elf read_elf() const {
 		ELF_Ident * ident = reinterpret_cast<ELF_Ident *>(addr);
 		if (size < sizeof(ELF_Ident) || !ident->valid()) {
-			std::cerr << "No valid ELF identification header!" << std::endl;
+			cerr << "No valid ELF identification header!" << endl;
 			exit(EXIT_FAILURE);
 		} else if (!ident->data_supported()) {
-			std::cerr << "Unsupported encoding!" << std::endl;
+			cerr << "Unsupported encoding!" << endl;
 			exit(EXIT_FAILURE);
 		} else if (ident->elfclass() != Elf::elfclass()) {
-			std::cerr << "Unsupported class!" << std::endl;
+			cerr << "Unsupported class!" << endl;
 			exit(EXIT_FAILURE);
 		}
 		Elf elf(reinterpret_cast<uintptr_t>(addr));
 		if (!elf.valid(size)) {
-			std::cerr << "No valid ELF file!" << std::endl;
+			cerr << "No valid ELF file!" << endl;
 			exit(EXIT_FAILURE);
 		}
 		return elf;

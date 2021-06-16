@@ -1,69 +1,50 @@
 #pragma once
 
-#include <cstdio>
-#include <cstring>
-
-#include <algorithm>
-#include <unordered_set>
-#include <set>
-#include <vector>
-
-#ifndef NOSTL
-#include <iostream>
-#include <iomanip>
-using namespace std;
-#endif
+#include <dlh/container/hash.hpp>
+#include <dlh/container/tree.hpp>
+#include <dlh/container/vector.hpp>
+#include <dlh/stream/output.hpp>
+#include <dlh/utils/bytebuffer.hpp>
+#include <dlh/utils/iterator.hpp>
+#include <dlh/utils/math.hpp>
 
 #include <capstone/capstone.h>
-#include "elf.hpp"
-#include "elf_rel.hpp"
-#include "xxhash64.h"
+#include <elfo/elf.hpp>
+#include <elfo/elf_rel.hpp>
+#include <xxhash64.h>
 
 struct Bean {
-	struct Symbol {
+ 	struct Symbol {
 		/*! \brief Start (virtual) address */
 		uintptr_t address;
 
 		/*! \brief Size */
-		mutable size_t size;
+		size_t size;
 
 		/*! \brief Symbol name (for debugging) */
-		mutable const char * name;
+		const char * name;
 
 		/*! \brief Identifier based on instructions (without refs) */
-		mutable uint64_t id;
+		uint64_t id;
 
 		/*! \brief Refs identifier */
-		mutable uint64_t id_ref;
+		uint64_t id_ref;
 
 		/*! \brief Symbol ids using this symbol
-		 * \note vector (instead of unordered_set) due to performance
 		 */
-		mutable std::vector<uintptr_t> deps;
+		HashSet<uintptr_t> deps;
 
 		/*! \brief Reference of used symbols */
-		mutable std::vector<uintptr_t> refs;
+		HashSet<uintptr_t> refs;
 
-		Symbol(uintptr_t address, size_t size, const char * name = nullptr) : address(address), size(size), name(name), id(0), id_ref(0) {}
-
-		void ref(uintptr_t to) const {
-			// only external references
-			if (to < address || to >= address + size)
-				refs.push_back(to);
-		}
-
-		bool dep(uintptr_t from) const {
-			// only add once
-			if (std::find(deps.begin(), deps.end(), from) == deps.end()) {
-				deps.push_back(from);
-				return true;
-			} else {
-				return false;
-			}
-		}
+		Symbol(uintptr_t address, size_t size, const char * name = nullptr) : address(address), size(size), name(name), id(0), id_ref(0)  {}
+		Symbol(const Symbol &) = default;
+		Symbol(Symbol &&) = default;
+		Symbol & operator=(const Symbol &) = default;
+		Symbol & operator=(Symbol &&) = default;
 
 		static void dump_header() {
-			cout << "ID               ID refs          [Ref / Dep] - Address             Size  Name" << endl;
+			cout << "ID               ID refs          [Ref / Dep] - Address             Size Name" << endl;
 		}
 
 		void dump(bool verbose = false) const {
@@ -72,9 +53,9 @@ struct Bean {
 				 << setw(16) << id_ref
 				 << setfill(' ') << dec;
 			if (verbose)
-				cout << " [" << refs.size() << " / " << deps.size() << "] - "
-				     << setfill('0') << hex << address << setfill(' ') << dec << ' '
-				     << size << ' ' << 	name;
+				cout << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << deps.size() << "] - "
+				     << "0x" << setw(16) << setfill('0') << hex << address
+				     << dec << setw(6) << setfill(' ') << right << size << ' ' << name;
 			cout << endl;
 		}
 
@@ -83,75 +64,76 @@ struct Bean {
 		}
 	};
 
-	struct SymbolSort {
-		using is_transparent = void;
+	struct SymbolComparison: public Comparison {
+		using Comparison::compare;
+		using Comparison::equal;
+		using Comparison::hash;
 
-		bool operator()(const Symbol & lhs, const Symbol & rhs) const { return lhs.address > rhs.address; }
-		bool operator()(uintptr_t lhs, const Symbol & rhs) const { return lhs > rhs.address; }
-		bool operator()(const Symbol & lhs, uintptr_t rhs) const { return lhs.address > rhs; }
+		static inline int compare(const Symbol & lhs, const Symbol & rhs) { return Comparison::compare(lhs.address, rhs.address); }
+		static inline int compare(uintptr_t lhs, const Symbol & rhs) { return Comparison::compare(lhs, rhs.address); }
+		static inline int compare(const Symbol & lhs, uintptr_t rhs) { return Comparison::compare(lhs.address, rhs); }
 
-		bool operator()(const Elf::Section & lhs, const Elf::Section & rhs) const { return lhs.virt_addr() > rhs.virt_addr(); }
-		bool operator()(const Symbol & lhs, const Elf::Section & rhs) const { return lhs.address > rhs.virt_addr(); }
-		bool operator()(const Elf::Section & lhs, const Symbol & rhs) const { return lhs.virt_addr() > rhs.address; }
+		static inline int compare(const Elf::Section & lhs, const Elf::Section & rhs) { return Comparison::compare(lhs.virt_addr(), rhs.virt_addr()); }
+		static inline int compare(const Symbol & lhs, const Elf::Section & rhs) { return Comparison::compare(lhs.address, rhs.virt_addr()); }
+		static inline int compare(const Elf::Section & lhs, const Symbol & rhs) { return Comparison::compare(lhs.virt_addr(), rhs.address); }
 
-		bool operator()(const Elf::Relocation & lhs, const Elf::Relocation & rhs) const { return lhs.offset() > rhs.offset(); }
-		bool operator()(const Symbol & lhs, const Elf::Relocation & rhs) const { return lhs.address > rhs.offset(); }
-		bool operator()(const Elf::Relocation & lhs, const Symbol & rhs) const { return lhs.offset() > rhs.address; }
-		bool operator()(uintptr_t lhs, const Elf::Relocation & rhs) const { return lhs > rhs.offset(); }
-		bool operator()(const Elf::Relocation & lhs, uintptr_t rhs) const { return lhs.offset() > rhs; }
+		static inline int compare(const Elf::Relocation & lhs, const Elf::Relocation & rhs) { return Comparison::compare(lhs.offset(), rhs.offset()); }
+		static inline int compare(const Symbol & lhs, const Elf::Relocation & rhs) { return Comparison::compare(lhs.address, rhs.offset()); }
+		static inline int compare(const Elf::Relocation & lhs, const Symbol & rhs) { return Comparison::compare(lhs.offset(), rhs.address); }
+		static inline int compare(uintptr_t lhs, const Elf::Relocation & rhs) { return Comparison::compare(lhs, rhs.offset()); }
+		static inline int compare(const Elf::Relocation & lhs, uintptr_t rhs) { return Comparison::compare(lhs.offset(), rhs); }
+
+		static inline uint32_t hash(const Symbol& sym) { return Comparison::hash(sym.id ^ sym.id_ref); }
+
+		template<typename T, typename U>
+		static inline bool equal(const T& a, const U& b) { return compare(a, b) == 0; }
 	};
 
-	class SymbolHash {
-	 public:
-		size_t operator()(const Symbol& sym) const {
-			return sym.id ^ sym.id_ref;
-		}
-	};
-
-	typedef std::unordered_set<Symbol, SymbolHash> symhash_t;
-	typedef std::set<Symbol, SymbolSort> symsort_t;
-	typedef std::vector<std::pair<uintptr_t, size_t>> memarea_t;
+	typedef HashSet<Symbol, SymbolComparison> symhash_t;
+	typedef TreeSet<Symbol, SymbolComparison> symtree_t;
+	typedef Vector<Pair<uintptr_t, size_t>> memarea_t;
 
 	const Elf & elf;
-	const symsort_t symbols;
+	const symtree_t symbols;
 
 	explicit Bean(const Elf & elf, bool resolve_relocations = true, bool explain = false) : elf(elf), symbols(analyze(elf, resolve_relocations, explain)) {}
 
 	void dump(bool verbose = false) const {
+		auto foo = *symbols.highest();
 		dump(symbols, verbose);
 	}
 
-	static void dump(const symsort_t & symbols, bool verbose = false) {
+	static void dump(const symtree_t & symbols, bool verbose = false) {
 		if (verbose)
 			Symbol::dump_header();
-		for (auto it = symbols.rbegin(); it != symbols.rend(); ++it)
-			it->dump(verbose);
+		for (const auto & sym : symbols)
+			sym.dump(verbose);
 	}
 
 	static void dump(const symhash_t & symbols, bool verbose = false) {
 		if (verbose) {
 			// Sort output by address
-			dump(symsort_t(symbols.begin(), symbols.end()), verbose);
+			dump(symtree_t(symbols.begin(), symbols.end()), verbose);
 		} else {
 			// unsorted
-			for (auto & sym: symbols)
+			for (const auto & sym: symbols)
 				sym.dump(verbose);
 		}
 	}
 
 	/*! \brief Merge memory areas */
-	const memarea_t merge(const symsort_t & symbols, size_t threshold = 0) const {
+	const memarea_t merge(const symtree_t & symbols, size_t threshold = 0) const {
 		memarea_t area;
-		for (auto it = symbols.rbegin(); it != symbols.rend(); ++it) {
+		for (const auto & sym : symbols) {
 			if (!area.empty()) {
 				const auto & address = area.back().first;
 				auto & size = area.back().second;
-				if (address + size + threshold >= it->address) {
-					size = it->address + it->size - address;
+				if (address + size + threshold >= sym.address) {
+					size = sym.address + sym.size - address;
 					continue;
 				}
 			}
-			area.emplace_back(it->address, it->size);
+			area.emplace_back(sym.address, sym.size);
 		}
 		return area;
 	}
@@ -160,7 +142,7 @@ struct Bean {
 	 * \note ids and names will be removed
 	 */
 	const memarea_t merge(const symhash_t & symbols, size_t threshold = 0) const {
-		return merge(symsort_t(symbols.begin(), symbols.end()), threshold);
+		return merge(symtree_t(symbols), threshold);
 	}
 
 	const memarea_t diffmerge(const symhash_t & other_symbols, bool include_dependencies = false, size_t threshold = 0) const {
@@ -174,57 +156,37 @@ struct Bean {
 	const symhash_t diff(const symhash_t & other_symbols, bool include_dependencies = false) const {
 		symhash_t result;
 		for (const auto & sym : symbols)
-			if (other_symbols.count(sym) == 0 && result.insert(sym).second && include_dependencies)
+			if (!other_symbols.contains(sym) && result.insert(sym).second && include_dependencies)
 				for (const auto d: sym.deps)
 					dependencies(d, result);
 		return result;
 	}
 
 	const symhash_t diff(const Bean & other, bool include_dependencies = false) const {
-		return diff(symhash_t(other.symbols.begin(), other.symbols.end()), include_dependencies);
+		return diff(symhash_t(other.symbols), include_dependencies);
 	}
 
 	const Symbol * get(uintptr_t address)  const  {
-		auto sym = symbols.lower_bound(address);
-		return sym != symbols.end() && address < sym->address + sym->size ? &(*sym) : nullptr;
+		auto sym = symbols.floor(address);
+		return sym && address < sym->address + sym->size ? &(*sym) : nullptr;
 	}
 
 	auto find(uintptr_t address = 0) const {
-		return std::make_reverse_iterator(symbols.upper_bound(address));
+		return symbols.floor(address);
 	}
 
 	auto begin() const {
-		return symbols.rbegin();
+		return symbols.begin();
 	}
 
 	auto end() const {
-		return symbols.rend();
+		return symbols.end();
 	}
 
  private:
-	template<int SIZE>
-	struct ByteBuffer {
-		uint8_t buffer[SIZE];
-		size_t size;
-
-		ByteBuffer() : size(0) {}
-
-		template<typename T>
-		size_t push(const T & v) {
-			assert(size + sizeof(T) < SIZE);
-			*reinterpret_cast<T *>(buffer + size) = v;
-			size += sizeof(T);
-			return sizeof(T);
-		}
-
-		void clear() {
-			size = 0;
-		}
-	};
-
 	void dependencies(uintptr_t address, symhash_t & result) const {
-		auto sym = symbols.lower_bound(address);
-		if (sym != symbols.end() && result.insert(*sym).second)
+		auto sym = symbols.ceil(address);
+		if (sym && result.emplace(*sym).second)
 			for (const auto d: sym->deps)
 				dependencies(d, result);
 	}
@@ -266,20 +228,20 @@ struct Bean {
 		}
 	}
 
-	static void insert_symbol(symsort_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
+	static void insert_symbol(symtree_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
 		auto pos = symbols.find(address);
-		if (pos == symbols.end()) {
-			symbols.insert(Symbol{address, size, name});
+		if (!pos) {
+			symbols.emplace(address, size, name);
 		} else {
-			const auto max_address = std::max(pos->address + pos->size, address + size);
+			const auto max_address = Math::max(pos->address + pos->size, address + size);
 			bool new_name = name != nullptr &&  (pos->name == nullptr || pos->name[0] == '\0');
 			if (address < pos->address) {
-				auto sym = symbols.extract(pos);
+				auto && sym = symbols.extract(pos);
 				sym.value().address = address;
 				sym.value().size = max_address - address;
 				if (new_name)
 					sym.value().name = name;
-				symbols.insert(std::move(sym));
+				symbols.insert(move(sym));
 			} else {
 				pos->size = max_address - pos->address;
 				if (new_name)
@@ -289,10 +251,10 @@ struct Bean {
 	}
 
 
-	static symsort_t analyze(const Elf &elf, bool resolve_relocations, bool explain) {
-		symsort_t symbols;
-		std::set<Elf::Section, SymbolSort> sections;
-		std::set<Elf::Relocation, SymbolSort> relocations;
+	static symtree_t analyze(const Elf &elf, bool resolve_relocations, bool explain) {
+		symtree_t symbols;
+		TreeSet<Elf::Section, SymbolComparison> sections;
+		TreeSet<Elf::Relocation, SymbolComparison> relocations;
 
 		// 1. Read symbols and segments
 		for (const auto & section: elf.sections) {
@@ -302,13 +264,14 @@ struct Bean {
 				// TODO: Read relocations, since they need to be compared as well (especially undefined ones...)
 				case Elf::SHT_REL:
 				case Elf::SHT_RELA:
-					for (const auto & entry : section.get_relocations())
+					for (const auto & entry : section.get_relocations()) {
 						relocations.emplace(entry);
+					}
 					break;
 
 				case Elf::SHT_SYMTAB:
 				case Elf::SHT_DYNSYM:
-					for (auto & sym: section.get_symbols())
+					for (auto & sym: section.get_symbols()) {
 						switch (sym.section_index()) {
 							case Elf::SHN_UNDEF:
 							case Elf::SHN_ABS:
@@ -324,6 +287,7 @@ struct Bean {
 								if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
 									insert_symbol(symbols, sym.value(), sym.size(), sym.name());
 						}
+					}
 					break;
 
 				default:
@@ -338,20 +302,22 @@ struct Bean {
 		// Prepare disassemble
 		csh cshandle;
 		if (::cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) != CS_ERR_OK)  // todo: depending on ELF
-			return {};
+			assert(false);
+
 		::cs_option(cshandle, CS_OPT_DETAIL, CS_OPT_ON);
-		cs_insn *insn = cs_malloc(cshandle);
+		cs_insn *insn = ::cs_malloc(cshandle);
 
 		// 2. Gather (additional) function start addresses by reading call-targets
 		//    if call target exists (from symtab)-> ignore
+		int i = 0;
 		for (const auto & section : sections) {
 			if (section.executable()) {
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
 				uintptr_t address = section.virt_addr();
 				insert_symbol(symbols, address, 0, section.name());
-
 				size_t size = section.size();
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
+					i++;
 					for (size_t g = 0; g < insn->detail->groups_count; g++) {
 						if (insn->detail->groups[g] == CS_GRP_CALL) {
 							auto & detail_x86 = insn->detail->x86;
@@ -371,15 +337,16 @@ struct Bean {
 		if (explain)
 			cout << "\e[3mFound " << symbols.size() << " unqiue symbols in machine code (+" << (symbols.size() - elf_symbols) << " compared to definition)\e[0m" << endl;
 
+
 		// 3. Disassemble again...
 		size_t last_addr = SIZE_MAX;
 		ByteBuffer<128> hashbuf;
-		for (auto & sym : symbols) {
-			const auto section = sections.lower_bound(sym);
-			assert(section != sections.end());
+		for (auto & sym : reverse(symbols)) {
+			const auto section = sections.floor(sym);
+			assert(section);
 
 			// 3a. calculate size (if 0), TODO: ignore nops!
-			const size_t max_addr = std::min(last_addr, section->virt_addr() + section->size());
+			const size_t max_addr = Math::min(last_addr, section->virt_addr() + section->size());
 			uintptr_t address = sym.address;
 			assert(max_addr >= address);
 			const size_t max_size = max_addr - address;
@@ -425,7 +392,7 @@ struct Bean {
 							opcode_size += hashbuf.push(detail_x86.opcode[o]);
 
 					// Handle relocations
-					const auto relocation = relocations.lower_bound(sym);
+					const auto relocation = relocations.floor(sym);
 					bool relocation_operand[2] = {false, false};
 					size_t rel_start = 0;
 					size_t rel_end = 0;
@@ -440,7 +407,7 @@ struct Bean {
 
 						if (relocation->symbol_index() == 0) { // TODO: Handling at resolve_relocations
 							// No Symbol - calculate target value and add as reference
-							sym.ref(relocator.value(0));
+							sym.refs.insert(relocator.value(0));
 							rel_name = "[fixed]";
 						} else {
 							// Hash relocation type and addend
@@ -454,7 +421,7 @@ struct Bean {
 								id.add(rel_sym.name(), strlen(rel_sym.name()));
 							} else {
 								// Add as reference -- TODO: Handle weak symbols
-								sym.ref(rel_sym.value());
+								sym.refs.insert(rel_sym.value());
 							}
 						}
 
@@ -507,7 +474,7 @@ struct Bean {
 								if (has_relocation) {
 									// Skip
 								} else if (branch_relative(insn->id)) {
-									sym.ref(op.imm);
+									sym.refs.insert(op.imm);
 								} else {
 									hashbuf.push(op.imm);
 								}
@@ -517,7 +484,7 @@ struct Bean {
 								// TODO: segment handling?
 								if (op.mem.base == X86_REG_RIP) {
 									if (!has_relocation)
-										sym.ref(insn->address + insn->size + op.mem.disp);
+										sym.refs.insert(insn->address + insn->size + op.mem.disp);
 								} else {
 									assert(!has_relocation);
 									hashbuf.push(op.mem);
@@ -530,7 +497,7 @@ struct Bean {
 					}
 
 					// add instruction hash buffer to hash
-					id.add(hashbuf.buffer, hashbuf.size);
+					id.add(hashbuf.buffer(), hashbuf.size());
 				}
 			} else {
 				// Non-executable objects will be fully hashed
@@ -550,12 +517,12 @@ struct Bean {
 			if (sym.refs.size() > 0) {
 				XXHash64 id_ref(0);  // TODO seed
 				for (const auto ref : sym.refs) {
-					auto ref_sym = symbols.lower_bound(ref);
-					if (ref_sym != symbols.end()) {
+					auto ref_sym = symbols.floor(ref);
+					if (ref_sym) {
 						// Hash ID and offset
 						const uint64_t r[2] = { ref_sym->id, ref - ref_sym->address};
 						id_ref.add(r, 2 * sizeof(uint64_t));
-						ref_sym->dep(sym.address);
+						ref_sym->deps.insert(sym.address);
 					} else {
 						// TODO
 					}

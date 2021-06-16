@@ -7,3 +7,6 @@
 [submodule "capstone"]
 	path = capstone
 	url = https://github.com/aquynh/capstone.git
+[submodule "dlh"]
+	path = dlh
+	url = git@gitlab.cs.fau.de:heinloth/dlh.git
