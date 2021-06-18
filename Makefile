@@ -6,7 +6,7 @@ CFLAGS += -fno-exceptions -fno-stack-protector -fno-pic  -mno-red-zone
 
 CXXFLAGS ?= -std=c++17 $(CFLAGS)
 CXXFLAGS += -MT $@ -MMD -MP -MF $(DEPDIR)/$@.d
-CXXFLAGS += -I include -I elfo/include/ -I xxhash/ $(foreach LIB,$(LIBS),-I $(LIB)/include)
+CXXFLAGS += -I include -I elfo/include/ $(foreach LIB,$(LIBS),-I $(LIB)/include)
 CXXFLAGS += -I dlh/legacy -DUSE_DLH
 CXXFLAGS += -fno-rtti -fno-use-cxa-atexit -no-pie
 CXXFLAGS += -nostdlib -nostdinc
@@ -19,7 +19,7 @@ DEPFILES := $(addprefix $(DEPDIR)/,$(addsuffix .d,$(TARGETS)))
 
 all: $(TARGETS)
 
-%: src/%.cpp Makefile # | $(foreach LIB,$(LIBS),$(LIB)/lib$(LIB).a) $(DEPDIR)
+%: src/%.cpp Makefile | dlh/libdlh.a  # | $(foreach LIB,$(LIBS),$(LIB)/lib$(LIB).a) $(DEPDIR)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
 
 capstone/libcapstone.a:

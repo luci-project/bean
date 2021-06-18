@@ -6,12 +6,12 @@
 #include <dlh/stream/output.hpp>
 #include <dlh/utils/bytebuffer.hpp>
 #include <dlh/utils/iterator.hpp>
+#include <dlh/utils/xxhash.hpp>
 #include <dlh/utils/math.hpp>
 
 #include <capstone/capstone.h>
 #include <elfo/elf.hpp>
 #include <elfo/elf_rel.hpp>
-#include <xxhash64.h>
 
 struct Bean {
  	struct Symbol {
@@ -113,7 +113,7 @@ struct Bean {
 	static void dump(const symhash_t & symbols, bool verbose = false) {
 		if (verbose) {
 			// Sort output by address
-			dump(symtree_t(symbols.begin(), symbols.end()), verbose);
+			dump(symtree_t(symbols), verbose);
 		} else {
 			// unsorted
 			for (const auto & sym: symbols)
@@ -504,6 +504,8 @@ struct Bean {
 				// TODO: Relocations to sym.ref && assert that relocation contents are zero
 				if (section->type() != Elf::SHT_NOBITS)
 					id.add(data, sym.size);
+				else
+					id.addZeros(sym.size);  // bss
 			}
 
 			sym.id = id.hash();
