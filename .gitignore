@@ -1,4 +1,4 @@
-.deps/
+.build/
 hash
 diff
 diffmem
