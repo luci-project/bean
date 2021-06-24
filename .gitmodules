@@ -1,9 +1,9 @@
+[submodule "dlh"]
+	path = dlh
+	url = ../dlh.git
 [submodule "elfo"]
 	path = elfo
-	url = git@gitlab.cs.fau.de:heinloth/elfo.git
+	url = ../elfo.git
 [submodule "capstone"]
 	path = capstone
 	url = https://github.com/aquynh/capstone.git
-[submodule "dlh"]
-	path = dlh
-	url = git@gitlab.cs.fau.de:heinloth/dlh.git
