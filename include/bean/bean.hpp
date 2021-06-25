@@ -44,7 +44,7 @@ struct Bean {
 		Symbol & operator=(Symbol &&) = default;
 
 		static void dump_header() {
-			cout << "ID               ID refs          [Ref / Dep] - Address             Size Name" << endl;
+			cout << "ID               ID refs          [Ref / Dep] - Address              Size Name" << endl;
 		}
 
 		void dump(bool verbose = false) const {
@@ -55,7 +55,7 @@ struct Bean {
 			if (verbose)
 				cout << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << deps.size() << "] - "
 				     << "0x" << setw(16) << setfill('0') << hex << address
-				     << dec << setw(6) << setfill(' ') << right << size << ' ' << name;
+				     << dec << setw(7) << setfill(' ') << right << size << ' ' << name;
 			cout << endl;
 		}
 
