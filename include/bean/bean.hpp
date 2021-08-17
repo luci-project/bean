@@ -6,6 +6,7 @@
 #include <dlh/stream/output.hpp>
 #include <dlh/utils/bytebuffer.hpp>
 #include <dlh/utils/iterator.hpp>
+#include <dlh/utils/string.hpp>
 #include <dlh/utils/xxhash.hpp>
 #include <dlh/utils/math.hpp>
 
@@ -30,6 +31,9 @@ struct Bean {
 		/*! \brief Refs identifier */
 		uint64_t id_ref;
 
+		/*! \brief Formatted content (for debugging) */
+		const char * debug;
+
 		/*! \brief Symbol ids using this symbol
 		 */
 		HashSet<uintptr_t> deps;
@@ -37,7 +41,7 @@ struct Bean {
 		/*! \brief Reference of used symbols */
 		HashSet<uintptr_t> refs;
 
-		Symbol(uintptr_t address, size_t size, const char * name = nullptr) : address(address), size(size), name(name), id(0), id_ref(0)  {}
+		Symbol(uintptr_t address, size_t size, const char * name = nullptr) : address(address), size(size), name(name), id(0), id_ref(0), debug(nullptr)  {}
 		Symbol(const Symbol &) = default;
 		Symbol(Symbol &&) = default;
 		Symbol & operator=(const Symbol &) = default;
@@ -76,6 +80,8 @@ struct Bean {
 		static inline int compare(const Elf::Section & lhs, const Elf::Section & rhs) { return Comparison::compare(lhs.virt_addr(), rhs.virt_addr()); }
 		static inline int compare(const Symbol & lhs, const Elf::Section & rhs) { return Comparison::compare(lhs.address, rhs.virt_addr()); }
 		static inline int compare(const Elf::Section & lhs, const Symbol & rhs) { return Comparison::compare(lhs.virt_addr(), rhs.address); }
+		static inline int compare(uintptr_t lhs, const Elf::Section & rhs) { return Comparison::compare(lhs, rhs.virt_addr()); }
+		static inline int compare(const Elf::Section & lhs, uintptr_t rhs) { return Comparison::compare(lhs.virt_addr(), rhs); }
 
 		static inline int compare(const Elf::Relocation & lhs, const Elf::Relocation & rhs) { return Comparison::compare(lhs.offset(), rhs.offset()); }
 		static inline int compare(const Symbol & lhs, const Elf::Relocation & rhs) { return Comparison::compare(lhs.address, rhs.offset()); }
@@ -228,6 +234,23 @@ struct Bean {
 		}
 	}
 
+	static const char * segment_name(Elf::phdr_type type) {
+		switch (type) {
+			case Elf::PT_LOAD: return "LOAD";
+			case Elf::PT_DYNAMIC: return "DYNAMIC";
+			case Elf::PT_INTERP: return "INTERP";
+			case Elf::PT_NOTE: return "NOTE";
+			case Elf::PT_SHLIB: return "SHLIB";
+			case Elf::PT_PHDR: return "PHDR";
+			case Elf::PT_TLS: return "TLS";
+			case Elf::PT_GNU_EH_FRAME: return "GNU_EH_FRAME";
+			case Elf::PT_GNU_STACK: return "GNU_STACK";
+			case Elf::PT_GNU_RELRO: return "GNU_RELRO";
+			case Elf::PT_GNU_PROPERTY: return "GNU_PROPERTY";
+			default: return nullptr;
+		}
+	}
+
 	static void insert_symbol(symtree_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
 		auto pos = symbols.find(address);
 		if (!pos) {
@@ -250,7 +273,6 @@ struct Bean {
 		}
 	}
 
-
 	static symtree_t analyze(const Elf &elf, bool resolve_relocations, bool explain) {
 		symtree_t symbols;
 		TreeSet<Elf::Section, SymbolComparison> sections;
@@ -264,9 +286,9 @@ struct Bean {
 				// TODO: Read relocations, since they need to be compared as well (especially undefined ones...)
 				case Elf::SHT_REL:
 				case Elf::SHT_RELA:
-					for (const auto & entry : section.get_relocations()) {
+					for (const auto & entry : section.get_relocations())
 						relocations.emplace(entry);
-					}
+
 					break;
 
 				case Elf::SHT_SYMTAB:
@@ -295,6 +317,16 @@ struct Bean {
 			}
 		}
 
+		// use Relocation targets to identify symbols
+		for (const auto & rel : relocations)
+			switch (rel.type()) {
+				case Elf::R_X86_64_RELATIVE:
+				case Elf::R_X86_64_RELATIVE64:
+					insert_symbol(symbols, rel.addend());
+				default:
+					break;
+			}
+
 		const size_t elf_symbols = symbols.size();
 		if (explain)
 			cout << "\e[3mElf contains " << sections.size() << " sections with definitions of " << elf_symbols << " unqiue symbols and " << relocations.size() << " relocations\e[0m" << endl;
@@ -311,23 +343,54 @@ struct Bean {
 		//    if call target exists (from symtab)-> ignore
 		int i = 0;
 		for (const auto & section : sections) {
+			// Add section start
+			uintptr_t address = section.virt_addr();
+			size_t size = section.size();
+			insert_symbol(symbols, address, 0, section.name());
+
+			// Find calls in exec
 			if (section.executable()) {
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
-				uintptr_t address = section.virt_addr();
-				insert_symbol(symbols, address, 0, section.name());
-				size_t size = section.size();
+
+				bool ret = false;
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
 					i++;
+
+					// The sequence "ret; (nop;) endbr" indicates the start of a new symbol
+					if (ret) {
+						switch (insn->id) {
+							case X86_INS_NOP:
+								continue;
+
+							case X86_INS_ENDBR32:
+							case X86_INS_ENDBR64:
+								insert_symbol(symbols, insn->address);
+								ret = false;
+								break;
+
+							default:
+								ret = false;
+								break;
+						}
+					}
 					for (size_t g = 0; g < insn->detail->groups_count; g++) {
 						if (insn->detail->groups[g] == CS_GRP_CALL) {
 							auto & detail_x86 = insn->detail->x86;
 							auto & op = detail_x86.operands[detail_x86.op_count - 1];
+							uintptr_t target = 0;
 							if (op.type == X86_OP_IMM)
-								insert_symbol(symbols, op.imm);
-							else if (op.type == X86_OP_MEM && op.mem.base == X86_REG_RIP) {
-								// Ignore segment, index, scale
-								insert_symbol(symbols, insn->address + insn->size + op.mem.disp);
-							}
+								target = op.imm;
+							else if (op.type == X86_OP_MEM && op.mem.base == X86_REG_RIP)
+								target = insn->address + insn->size + op.mem.disp;
+							else
+								continue;
+
+							// Only in executable sections
+							const auto section = sections.floor(target);
+							if (section && section->executable())
+								insert_symbol(symbols, target);
+						} else if (insn->detail->groups[g] == CS_GRP_RET) {
+							ret = true;
 						}
 					}
 				}
@@ -354,7 +417,7 @@ struct Bean {
 				sym.size = max_size;
 
 			if (explain)
-				cout << endl << "\e[1m" << sym.name << "\e[0m (" << section->name() << ", " << sym.size << " bytes)" << endl;
+				cout << endl << "\e[1m" << sym.name << "\e[0m (" << section->name() << ", " << dec << sym.size << " bytes)" << endl;
 
 			// 3b. generate links (from jmp + call) & hash
 			const size_t offset = address - section->virt_addr();
@@ -379,7 +442,7 @@ struct Bean {
 						else
 							prefix_size += hashbuf.push(detail_x86.prefix[p]);
 
-					// Has REX prefix? (do not has, since it only affects ops)
+					// Has REX prefix? (do not hash, since it only affects ops)
 					if (detail_x86.rex != 0)
 						prefix_size++;
 
@@ -391,102 +454,83 @@ struct Bean {
 						else
 							opcode_size += hashbuf.push(detail_x86.opcode[o]);
 
-					// Handle relocations
-					const auto relocation = relocations.floor(sym);
-					bool relocation_operand[2] = {false, false};
-					size_t rel_start = 0;
-					size_t rel_end = 0;
-					const char * rel_name = nullptr;
-					if (relocation != relocations.end() && relocation->offset() < insn->address + insn->size) {
-						const auto relocator = Relocator(*relocation);
-						const auto rel_off = relocation->offset();
-						const auto rel_size = relocator.size();
-						rel_start = relocation->offset() - insn->address;
-						rel_end = rel_start + rel_size;
-						//assert(rel_off + rel_size <= insn->address + insn->size);
-
-						if (relocation->symbol_index() == 0) { // TODO: Handling at resolve_relocations
-							// No Symbol - calculate target value and add as reference
-							sym.refs.insert(relocator.value(0));
-							rel_name = "[fixed]";
-						} else {
-							// Hash relocation type and addend
-							hashbuf.push(relocation->type());
-							hashbuf.push(relocation->addend());
-							// Get relocation symbol
-							const auto rel_sym = relocation->symbol();
-							rel_name = rel_sym.name();
-							if (!resolve_relocations || rel_sym.section_index() == Elf::SHN_UNDEF) {
-								// hash symbol name
-								id.add(rel_sym.name(), strlen(rel_sym.name()));
-							} else {
-								// Add as reference -- TODO: Handle weak symbols
-								sym.refs.insert(rel_sym.value());
-							}
-						}
-
-						// Memory should be zero for hash
-						for (size_t i = 0; i < rel_size; i++) {
-							assert(*(data - insn->size + (rel_off - insn->address) + i) == 0);
-						}
-
-						// Find affected operand (we only support one or two for relocation)
-						assert(detail_x86.op_count > 0 && detail_x86.op_count <= 2);
-						size_t op = detail_x86.op_count == 2 ? 1 : 0;
-						relocation_operand[op] = rel_off + rel_size == insn->address + insn->size;
-						relocation_operand[1 - op] = !relocation_operand[op];
-					}
-
-					if (explain) {
-						cout << setfill('0') << setw(16) << hex << insn->address;
-						for (size_t i = 0; i < 12; i++) {
-							if (i < insn->size) {
-								if (i >= rel_start && i < rel_end)
-									cout << "\e[35m";
-								else if (i < prefix_size)
-									cout << "\e[34;3m";
-								else if (i < prefix_size + opcode_size)
-									cout << "\e[34m";
-								else
-									cout << "\e[36m";
-								cout << ' ' << setw(2) << insn->bytes[i] << "\e[0m";
-							} else {
-								cout << "   ";
-							}
-						}
-						cout << "\e[34m" << insn->mnemonic << "\e[0m \e[36m" << insn->op_str << "\e[0m";
-						if (rel_name != nullptr)
-							cout << "\e[35m-> " << rel_name << "\e[0m";
-						cout << endl;
-					}
+					// Helper for explain
+					int explain_ignore = 255;
+					struct {
+						bool hashed = true;
+						bool relocation = false;
+						uintptr_t value = 0;
+						const char * rel_name = nullptr;
+						uintptr_t rel_value = 0;
+					} op_explain[detail_x86.op_count];
 
 					// Handle operands
 					for (int o = 0; o < detail_x86.op_count; o++) {
-						bool has_relocation = o < 2 && relocation_operand[o];
 						auto & op = detail_x86.operands[o];
+
 						switch (op.type) {
 							case X86_OP_REG:
-								assert(!has_relocation);
 								hashbuf.push(op.reg);
 								break;
 
 							case X86_OP_IMM:
-								if (has_relocation) {
-									// Skip
-								} else if (branch_relative(insn->id)) {
-									sym.refs.insert(op.imm);
+							{
+								const auto target = static_cast<uintptr_t>(op.imm);
+								if (branch_relative(insn->id)) {
+									op_explain[o].value = target;
+
+									// Inside symbol?
+									if (target >= sym.address && target < sym.address + sym.size) {
+										// same symbol, hence just hash
+										hashbuf.push(target);
+									} else {
+										// other symbol, add reference
+										sym.refs.insert(target);
+										op_explain[o].hashed = false;
+									}
 								} else {
-									hashbuf.push(op.imm);
+									hashbuf.push(target);
 								}
 								break;
+							}
 
 							case X86_OP_MEM:
 								// TODO: segment handling?
 								if (op.mem.base == X86_REG_RIP) {
-									if (!has_relocation)
-										sym.refs.insert(insn->address + insn->size + op.mem.disp);
+									const auto target = insn->address + insn->size + op.mem.disp;
+									op_explain[o].hashed = false;
+									op_explain[o].value = static_cast<uintptr_t>(target);
+
+									// Check if target is a relocated value (GOT)
+									const auto relocation = relocations.find(target);
+									if (relocation != relocations.end())  {
+										assert(relocation->valid());
+										op_explain[o].relocation = true;
+										if (relocation->symbol_index() == 0) { // TODO: Handling at resolve_relocations
+											// No Symbol - calculate target value and add as reference
+											auto resolved = Relocator(*relocation).value(0);
+											sym.refs.insert(resolved);
+											op_explain[o].rel_value = resolved;
+										} else {
+											// Hash relocation type and addend
+											hashbuf.push(relocation->type());
+											hashbuf.push(relocation->addend());
+											// Get relocation symbol
+											const auto rel_sym = relocation->symbol();
+											if (!resolve_relocations || rel_sym.section_index() == Elf::SHN_UNDEF) {
+												// hash symbol name
+												id.add(rel_sym.name(), strlen(rel_sym.name()));
+												op_explain[o].rel_name = rel_sym.name();
+											} else {
+												// Add as reference -- TODO: Handle weak symbols
+												sym.refs.insert(rel_sym.value());
+												op_explain[o].rel_value = rel_sym.value();
+											}
+										}
+									} else {
+										sym.refs.insert(target);
+									}
 								} else {
-									assert(!has_relocation);
 									hashbuf.push(op.mem);
 								}
 								break;
@@ -494,6 +538,81 @@ struct Bean {
 							default:
 								break;
 						}
+
+						if (explain_ignore > o && !op_explain[o].hashed) {
+							explain_ignore = o;
+							if (o == 0 && detail_x86.modrm != 0)
+								explain_ignore++;
+						}
+					}
+
+					if (explain) {
+						cout << "0x" << setfill('0') << setw(16) << right << hex << insn->address;
+						int op = 0;
+						size_t op_size = 0;
+						for (size_t i = 0; i < 12; i++) {
+							if (i < insn->size) {
+								cout << ' ';
+								if (i < prefix_size)
+									cout << "\e[34;3m";
+								else if (i < prefix_size + opcode_size)
+									cout << "\e[34m";
+								else if (i >= prefix_size + opcode_size + explain_ignore)
+									// This is not necessarly accurate - depending on the encoding
+									// however it is only for hash visualization, the real hash uses the disassembled inormation instead of the machine code bytes
+									cout << "\e[35m";
+								else
+									cout << "\e[36m";
+								cout << setw(2) << static_cast<int>(insn->bytes[i]) << "\e[0m";
+							} else {
+								cout << "   ";
+							}
+						}
+						cout << "\e[34m" << insn->mnemonic << "\e[0m ";
+						auto ops = String::split(insn->op_str, ',');
+						//assert(ops.size() == detail_x86.op_count);
+						for (int o = 0; o < detail_x86.op_count; o++) {
+							if (o > 0)
+								cout << "\e[36m,";
+							if (!op_explain[o].hashed)
+								cout << "\e[35m";
+							else if (o == 0)
+								cout << "\e[36m";
+							cout << ops[o] << "\e[0m";
+						}
+
+						auto print_target = [&symbols](uintptr_t value) {
+							cout << "0x" << hex << value;
+							auto ref_sym = symbols.floor(value);
+							if (ref_sym && (ref_sym->name != nullptr)) {
+								cout << " <";
+								if (ref_sym->name != nullptr)
+									cout << ref_sym->name;
+								else
+									cout << "0x" << hex << ref_sym->address;
+								if (ref_sym->address != value)
+									cout << " + " << dec << (value - ref_sym->address);
+								cout << '>';
+							}
+						};
+
+						// Additional information for reference operands
+						for (int o = 0; o < detail_x86.op_count; o++) {
+							auto & op = op_explain[o];
+							if (op.value != 0) {
+								cout << "  # ";
+								print_target(op.value);
+								if (op.relocation) {
+									cout << " \e[3m[";
+									if (op.rel_name != nullptr)
+										cout << op.rel_name;
+									else
+										print_target(op.rel_value);
+									cout << "]\e[0m";
+								}
+							}
+						}
+						cout << endl;
 					}
 
 					// add instruction hash buffer to hash
@@ -506,6 +625,21 @@ struct Bean {
 					id.add(data, sym.size);
 				else
 					id.addZeros(sym.size);  // bss
+
+				if (explain) {
+					for (size_t a = address & (~0xf); a < address + sym.size; a++) {
+						if (a % 16 == 0) {
+							if (a > address)
+								cout << endl;
+							cout << "0x" << setfill('0') << setw(16) << right << hex << a;
+						}
+						if (a < address)
+							cout << "   ";
+						else
+							cout << " \e[33m" << setw(2) << static_cast<int>(section->type() != Elf::SHT_NOBITS ? data[a - address] : 0) << "\e[0m";
+					}
+					cout << endl << endl;
+				}
 			}
 
 			sym.id = id.hash();
