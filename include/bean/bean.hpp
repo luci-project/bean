@@ -234,23 +234,6 @@ struct Bean {
 		}
 	}
 
-	static const char * segment_name(Elf::phdr_type type) {
-		switch (type) {
-			case Elf::PT_LOAD: return "LOAD";
-			case Elf::PT_DYNAMIC: return "DYNAMIC";
-			case Elf::PT_INTERP: return "INTERP";
-			case Elf::PT_NOTE: return "NOTE";
-			case Elf::PT_SHLIB: return "SHLIB";
-			case Elf::PT_PHDR: return "PHDR";
-			case Elf::PT_TLS: return "TLS";
-			case Elf::PT_GNU_EH_FRAME: return "GNU_EH_FRAME";
-			case Elf::PT_GNU_STACK: return "GNU_STACK";
-			case Elf::PT_GNU_RELRO: return "GNU_RELRO";
-			case Elf::PT_GNU_PROPERTY: return "GNU_PROPERTY";
-			default: return nullptr;
-		}
-	}
-
 	static void insert_symbol(symtree_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
 		auto pos = symbols.find(address);
 		if (!pos) {
@@ -352,45 +335,78 @@ struct Bean {
 			if (section.executable()) {
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
 
+				// For better readability, name the PLT functions
+				bool plt_name = explain && strncmp(section.name(), ".plt.", 5) == 0;
+
+				// start of current function
+				uintptr_t start = address;
+
+				// was the last instruction a return?
 				bool ret = false;
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
 					i++;
 
 					// The sequence "ret; (nop;) endbr" indicates the start of a new symbol
-					if (ret) {
-						switch (insn->id) {
-							case X86_INS_NOP:
-								continue;
+					switch (insn->id) {
+						case X86_INS_NOP:
+							continue;
 
-							case X86_INS_ENDBR32:
-							case X86_INS_ENDBR64:
-								insert_symbol(symbols, insn->address);
+						case X86_INS_ENDBR32:
+						case X86_INS_ENDBR64:
+							start = insn->address;
+							if (ret) {
+								insert_symbol(symbols, start);
 								ret = false;
-								break;
+							}
+							break;
 
-							default:
-								ret = false;
-								break;
-						}
+						default:
+							ret = false;
+							break;
 					}
-					for (size_t g = 0; g < insn->detail->groups_count; g++) {
-						if (insn->detail->groups[g] == CS_GRP_CALL) {
-							auto & detail_x86 = insn->detail->x86;
-							auto & op = detail_x86.operands[detail_x86.op_count - 1];
-							uintptr_t target = 0;
-							if (op.type == X86_OP_IMM)
-								target = op.imm;
-							else if (op.type == X86_OP_MEM && op.mem.base == X86_REG_RIP)
-								target = insn->address + insn->size + op.mem.disp;
-							else
-								continue;
 
-							// Only in executable sections
-							const auto section = sections.floor(target);
-							if (section && section->executable())
-								insert_symbol(symbols, target);
-						} else if (insn->detail->groups[g] == CS_GRP_RET) {
-							ret = true;
+					for (size_t g = 0; g < insn->detail->groups_count; g++) {
+						switch (insn->detail->groups[g]) {
+							case CS_GRP_JUMP:
+								if (plt_name) {
+									assert(insn->detail->x86.op_count == 1);
+									auto & op = insn->detail->x86.operands[0];
+									assert(op.type == X86_OP_MEM && op.mem.base == X86_REG_RIP);
+
+									const auto relocation = relocations.find(insn->address + insn->size + op.mem.disp);
+									assert(relocation && relocation->symbol_index() != 0);
+									auto name = relocation->symbol().name();
+
+									auto pos = symbols.find(start);
+									if (pos)
+										pos->name = name;
+									else
+										symbols.emplace(start, address - start, name);
+								}
+								break;
+
+							case CS_GRP_CALL:
+							{
+								auto & detail_x86 = insn->detail->x86;
+								auto & op = detail_x86.operands[detail_x86.op_count - 1];
+								uintptr_t target = 0;
+								if (op.type == X86_OP_IMM)
+									target = op.imm;
+								else if (op.type == X86_OP_MEM && op.mem.base == X86_REG_RIP)
+									target = insn->address + insn->size + op.mem.disp;
+								else
+									continue;
+
+								// Only in executable sections
+								const auto section = sections.floor(target);
+								if (section && section->executable())
+									insert_symbol(symbols, target);
+
+								break;
+							}
+							case CS_GRP_RET:
+								ret = true;
+								break;
 						}
 					}
 				}
@@ -424,7 +440,7 @@ struct Bean {
 			const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
 			XXHash64 id(0);  // TODO seed
 			if (section->executable()) {
-				size_t size = sym.size - 1;
+				size_t size = sym.size;
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
 					if (insn->id == X86_INS_NOP)
 						continue;
@@ -581,15 +597,20 @@ struct Bean {
 							cout << ops[o] << "\e[0m";
 						}
 
-						auto print_target = [&symbols](uintptr_t value) {
+						auto print_target = [&symbols, &sections](uintptr_t value) {
 							cout << "0x" << hex << value;
-							auto ref_sym = symbols.floor(value);
+							const auto ref_sym = symbols.floor(value);
 							if (ref_sym && (ref_sym->name != nullptr)) {
 								cout << " <";
 								if (ref_sym->name != nullptr)
 									cout << ref_sym->name;
 								else
 									cout << "0x" << hex << ref_sym->address;
+
+								const auto ref_sec = sections.floor(value);
+								if (ref_sec && strcmp(ref_sym->name, ref_sec->name()) != 0)
+									cout << '@' << ref_sec->name();
+
 								if (ref_sym->address != value)
 									cout << " + " << dec << (value - ref_sym->address);
 								cout << '>';
