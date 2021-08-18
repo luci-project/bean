@@ -15,7 +15,37 @@
 #include <elfo/elf_rel.hpp>
 
 struct Bean {
- 	struct Symbol {
+	struct SymbolRelocation {
+		uintptr_t offset;
+		uintptr_t type;
+		const char * name;
+		uintptr_t addend;
+		uintptr_t target;
+		bool undefined;
+
+		SymbolRelocation(uintptr_t offset, uintptr_t type, const char * name = nullptr, uintptr_t addend = 0, bool undefined = false, uintptr_t target = 0)
+		  : offset(offset), type(type), name(name), addend(addend), target(target), undefined(undefined) {}
+
+		SymbolRelocation(const Elf::Relocation & relocation, bool resolve_target = false, uintptr_t global_offset_table = 0)
+		  : offset(relocation.offset()), type(relocation.type()), name(nullptr), addend(relocation.addend()), target(0) {
+			assert(relocation.valid());
+
+			// Get relocation symbol
+			if (relocation.symbol_index() != 0) {
+				const auto rel_sym = relocation.symbol();
+				name = rel_sym.name();
+				undefined = (rel_sym.section_index() == Elf::SHN_UNDEF);
+			}
+
+			// Perform relocation
+			if (resolve_target && !undefined)
+				target = Relocator(relocation, global_offset_table).value(0);
+		}
+	};
+
+	struct SymbolComparison;
+
+	struct Symbol {
 		/*! \brief Start (virtual) address */
 		uintptr_t address;
 
@@ -23,12 +53,18 @@ struct Bean {
 		size_t size;
 
 		/*! \brief Symbol name (for debugging) */
-		const char * name;
+		const char * name; // TODO: Remove (use debug)
 
-		/*! \brief Identifier based on instructions (without refs) */
+		/*! \brief Flag for executable symbol */
+		bool executable = false;
+
+		/*! \brief Flag for writable symbol */
+		bool writeable = false;
+
+		/*! \brief Identifier based on instructions (without refs / rels) */
 		uint64_t id;
 
-		/*! \brief Refs identifier */
+		/*! \brief Refs & and Rels identifier */
 		uint64_t id_ref;
 
 		/*! \brief Formatted content (for debugging) */
@@ -41,6 +77,9 @@ struct Bean {
 		/*! \brief Reference of used symbols */
 		HashSet<uintptr_t> refs;
 
+		/*! \brief Relocations affecting this symbol */
+		TreeSet<SymbolRelocation, SymbolComparison> rels;
+
 		Symbol(uintptr_t address, size_t size, const char * name = nullptr) : address(address), size(size), name(name), id(0), id_ref(0), debug(nullptr)  {}
 		Symbol(const Symbol &) = default;
 		Symbol(Symbol &&) = default;
@@ -48,7 +87,7 @@ struct Bean {
 		Symbol & operator=(Symbol &&) = default;
 
 		static void dump_header() {
-			cout << "ID               ID refs          [Ref / Dep] - Address              Size Name" << endl;
+			cout << "ID               ID refs          [Ref / Rel / Dep] - Address              Size Fl Name" << endl;
 		}
 
 		void dump(bool verbose = false) const {
@@ -57,9 +96,11 @@ struct Bean {
 				 << setw(16) << id_ref
 				 << setfill(' ') << dec;
 			if (verbose)
-				cout << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << deps.size() << "] - "
+				cout << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
 				     << "0x" << setw(16) << setfill('0') << hex << address
-				     << dec << setw(7) << setfill(' ') << right << size << ' ' << name;
+				     << dec << setw(7) << setfill(' ') << right << size << ' '
+				     << (writeable ? 'W' : ' ') << (executable ? 'X' : ' ')
+				     << ' ' << name;
 			cout << endl;
 		}
 
@@ -89,6 +130,10 @@ struct Bean {
 		static inline int compare(uintptr_t lhs, const Elf::Relocation & rhs) { return Comparison::compare(lhs, rhs.offset()); }
 		static inline int compare(const Elf::Relocation & lhs, uintptr_t rhs) { return Comparison::compare(lhs.offset(), rhs); }
 
+		static inline int compare(const SymbolRelocation & lhs, const SymbolRelocation & rhs) { return Comparison::compare(lhs.offset, rhs.offset); }
+		static inline int compare(uintptr_t lhs, const SymbolRelocation & rhs) { return Comparison::compare(lhs, rhs.offset); }
+		static inline int compare(const SymbolRelocation & lhs, uintptr_t rhs) { return Comparison::compare(lhs.offset, rhs); }
+
 		static inline uint32_t hash(const Symbol& sym) { return Comparison::hash(sym.id ^ sym.id_ref); }
 
 		template<typename T, typename U>
@@ -102,7 +147,7 @@ struct Bean {
 	const Elf & elf;
 	const symtree_t symbols;
 
-	explicit Bean(const Elf & elf, bool resolve_relocations = true, bool explain = false) : elf(elf), symbols(analyze(elf, resolve_relocations, explain)) {}
+	explicit Bean(const Elf & elf, bool resolve_internal_relocations = true, bool explain = false) : elf(elf), symbols(analyze(elf, resolve_internal_relocations, explain)) {}
 
 	void dump(bool verbose = false) const {
 		auto foo = *symbols.highest();
@@ -256,10 +301,12 @@ struct Bean {
 		}
 	}
 
-	static symtree_t analyze(const Elf &elf, bool resolve_relocations, bool explain) {
+	static symtree_t analyze(const Elf &elf, bool resolve_internal_relocations, bool explain) {
 		symtree_t symbols;
 		TreeSet<Elf::Section, SymbolComparison> sections;
 		TreeSet<Elf::Relocation, SymbolComparison> relocations;
+
+		uintptr_t global_offset_table = 0;
 
 		// 1. Read symbols and segments
 		for (const auto & section: elf.sections) {
@@ -424,6 +471,10 @@ struct Bean {
 			const auto section = sections.floor(sym);
 			assert(section);
 
+			// Set symbol flags
+			sym.executable = section->executable();
+			sym.writeable = section->writeable();
+
 			// 3a. calculate size (if 0), TODO: ignore nops!
 			const size_t max_addr = Math::min(last_addr, section->virt_addr() + section->size());
 			uintptr_t address = sym.address;
@@ -439,7 +490,7 @@ struct Bean {
 			const size_t offset = address - section->virt_addr();
 			const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
 			XXHash64 id(0);  // TODO seed
-			if (section->executable()) {
+			if (sym.executable) {
 				size_t size = sym.size;
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
 					if (insn->id == X86_INS_NOP)
@@ -522,7 +573,7 @@ struct Bean {
 									if (relocation != relocations.end())  {
 										assert(relocation->valid());
 										op_explain[o].relocation = true;
-										if (relocation->symbol_index() == 0) { // TODO: Handling at resolve_relocations
+										if (relocation->symbol_index() == 0) { // TODO: Handling at resolve_internal_relocations
 											// No Symbol - calculate target value and add as reference
 											auto resolved = Relocator(*relocation).value(0);
 											sym.refs.insert(resolved);
@@ -533,14 +584,14 @@ struct Bean {
 											hashbuf.push(relocation->addend());
 											// Get relocation symbol
 											const auto rel_sym = relocation->symbol();
-											if (!resolve_relocations || rel_sym.section_index() == Elf::SHN_UNDEF) {
+											op_explain[o].rel_value = rel_sym.value();
+											if (!resolve_internal_relocations || rel_sym.section_index() == Elf::SHN_UNDEF) {
 												// hash symbol name
 												id.add(rel_sym.name(), strlen(rel_sym.name()));
 												op_explain[o].rel_name = rel_sym.name();
 											} else {
 												// Add as reference -- TODO: Handle weak symbols
 												sym.refs.insert(rel_sym.value());
-												op_explain[o].rel_value = rel_sym.value();
 											}
 										}
 									} else {
@@ -597,6 +648,7 @@ struct Bean {
 							cout << ops[o] << "\e[0m";
 						}
 
+						// Pretty print target
 						auto print_target = [&symbols, &sections](uintptr_t value) {
 							cout << "0x" << hex << value;
 							const auto ref_sym = symbols.floor(value);
@@ -623,7 +675,7 @@ struct Bean {
 							if (op.value != 0) {
 								cout << "  # ";
 								print_target(op.value);
-								if (op.relocation) {
+								if (op.relocation && op.value != op.rel_value) {
 									cout << " \e[3m[";
 									if (op.rel_name != nullptr)
 										cout << op.rel_name;
@@ -640,24 +692,72 @@ struct Bean {
 					id.add(hashbuf.buffer(), hashbuf.size());
 				}
 			} else {
+				// 3c. Link relocations to (data) symbols
+				for (auto relocation = relocations.ceil(sym); relocation != relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
+					auto r = sym.rels.emplace(*relocation, resolve_internal_relocations, global_offset_table);
+					// Add local (internal) relocation as reference
+					if (r.second && resolve_internal_relocations && !r.first->undefined)
+						sym.refs.insert(r.first->target);
+				}
+
+				// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
+				if (sym.writeable)
+					id.add<uint32_t>(address & 0xfff);  // Assuming 4k page size, TODO: detect (Segments!)
+
 				// Non-executable objects will be fully hashed
-				// TODO: Relocations to sym.ref && assert that relocation contents are zero
 				if (section->type() != Elf::SHT_NOBITS)
 					id.add(data, sym.size);
 				else
 					id.addZeros(sym.size);  // bss
 
 				if (explain) {
-					for (size_t a = address & (~0xf); a < address + sym.size; a++) {
-						if (a % 16 == 0) {
-							if (a > address)
-								cout << endl;
-							cout << "0x" << setfill('0') << setw(16) << right << hex << a;
-						}
-						if (a < address)
+					auto rel = sym.rels.lowest();
+					bool had_rel = false;
+					size_t rel_end = 0;
+					const size_t bytes_per_line = 16;
+					for (size_t a = Math::align_down(address, bytes_per_line); a < Math::align_up(address + sym.size, bytes_per_line); a++) {
+						if (a % bytes_per_line == 0)
+							cout << "0x" << setfill('0') << setw(16) << right << hex << a << (a < rel_end ? "\e[33;4m" : "\e[33m");
+						if (a < address || a >= address + sym.size) {
+							if (rel && a == rel_end)
+								cout << "\e[0m";
 							cout << "   ";
-						else
-							cout << " \e[33m" << setw(2) << static_cast<int>(section->type() != Elf::SHT_NOBITS ? data[a - address] : 0) << "\e[0m";
+						} else {
+							if (rel && a == rel_end) {
+								cout << "\e[0;33m ";
+								rel_end = 0;
+								++rel;
+							} else {
+								cout << ' ';
+							}
+							if (rel && a == rel->offset) {
+								cout << "\e[33;4m";
+								had_rel = true;
+								rel_end = rel->offset + Relocator<Elf::Relocation>::size(rel->type, elf.header.machine());
+							}
+							cout << setw(2) << static_cast<int>(section->type() != Elf::SHT_NOBITS ? data[a - address] : 0);
+						}
+						if ((a + 1) % bytes_per_line == 0 && a > address) {
+							cout << "\e[0m";
+							if (had_rel) {
+								cout << "  #";
+								for (auto r = sym.rels.ceil(a - bytes_per_line); r && r->offset <= a; ++r ) {
+									cout << " \e[4m";
+									if (r->name != nullptr) {
+										cout << r->name;
+										if (r->addend != 0)
+											cout << " + " << r->addend;
+									} else {
+										cout << r->addend;
+									}
+									cout << "\e[0m";
+								}
+
+								// TODO List all rels
+								had_rel = false;
+							}
+							cout << endl;
+						}
 					}
 					cout << endl << endl;
 				}
@@ -671,14 +771,22 @@ struct Bean {
 
 		// 4. Calculate full id, set dependencies and add to final set
 		for (auto & sym : symbols) {
-			if (sym.refs.size() > 0) {
+			if (sym.rels.size() > 0 || sym.refs.size() > 0 ) {
 				XXHash64 id_ref(0);  // TODO seed
+				// Relocations
+				for (const auto rel : sym.rels) {
+					id_ref.add<uintptr_t>(rel.offset);
+					id_ref.add<uintptr_t>(rel.type);
+					id_ref.add(rel.name, strlen(rel.name));
+					id_ref.add<uintptr_t>(rel.addend);
+				}
+				// References
 				for (const auto ref : sym.refs) {
 					auto ref_sym = symbols.floor(ref);
 					if (ref_sym) {
 						// Hash ID and offset
-						const uint64_t r[2] = { ref_sym->id, ref - ref_sym->address};
-						id_ref.add(r, 2 * sizeof(uint64_t));
+						id_ref.add<uint64_t>(ref_sym->id);
+						id_ref.add<uint64_t>(ref - ref_sym->address);
 						ref_sym->deps.insert(sym.address);
 					} else {
 						// TODO
