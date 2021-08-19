@@ -279,6 +279,26 @@ struct Bean {
 		}
 	}
 
+	static void dump_address(BufferStream & bs, uintptr_t value, const symtree_t & symbols, const TreeSet<Elf::Section, SymbolComparison> & sections) {
+		bs << "0x" << hex << value;
+		const auto ref_sym = symbols.floor(value);
+		if (ref_sym && (ref_sym->name != nullptr)) {
+			bs << " <";
+			if (ref_sym->name != nullptr)
+				bs << ref_sym->name;
+			else
+				bs << "0x" << hex << ref_sym->address;
+
+			const auto ref_sec = sections.floor(value);
+			if (ref_sec && strcmp(ref_sym->name, ref_sec->name()) != 0)
+				bs << '@' << ref_sec->name();
+
+			if (ref_sym->address != value)
+				bs << " + " << dec << (value - ref_sym->address);
+			bs << '>';
+		}
+	}
+
 	static void insert_symbol(symtree_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
 		auto pos = symbols.find(address);
 		if (!pos) {
@@ -463,7 +483,6 @@ struct Bean {
 		if (explain)
 			cout << "\e[3mFound " << symbols.size() << " unqiue symbols in machine code (+" << (symbols.size() - elf_symbols) << " compared to definition)\e[0m" << endl;
 
-
 		// 3. Disassemble again...
 		size_t last_addr = SIZE_MAX;
 		ByteBuffer<128> hashbuf;
@@ -527,8 +546,6 @@ struct Bean {
 						bool hashed = true;
 						bool relocation = false;
 						uintptr_t value = 0;
-						const char * rel_name = nullptr;
-						uintptr_t rel_value = 0;
 					} op_explain[detail_x86.op_count];
 
 					// Handle operands
@@ -565,38 +582,10 @@ struct Bean {
 								// TODO: segment handling?
 								if (op.mem.base == X86_REG_RIP) {
 									const auto target = insn->address + insn->size + op.mem.disp;
+									sym.refs.insert(target);
+
 									op_explain[o].hashed = false;
 									op_explain[o].value = static_cast<uintptr_t>(target);
-
-									// Check if target is a relocated value (GOT)
-									const auto relocation = relocations.find(target);
-									if (relocation != relocations.end())  {
-										assert(relocation->valid());
-										op_explain[o].relocation = true;
-										if (relocation->symbol_index() == 0) { // TODO: Handling at resolve_internal_relocations
-											// No Symbol - calculate target value and add as reference
-											auto resolved = Relocator(*relocation).value(0);
-											sym.refs.insert(resolved);
-											op_explain[o].rel_value = resolved;
-										} else {
-											// Hash relocation type and addend
-											hashbuf.push(relocation->type());
-											hashbuf.push(relocation->addend());
-											// Get relocation symbol
-											const auto rel_sym = relocation->symbol();
-											op_explain[o].rel_value = rel_sym.value();
-											if (!resolve_internal_relocations || rel_sym.section_index() == Elf::SHN_UNDEF) {
-												// hash symbol name
-												id.add(rel_sym.name(), strlen(rel_sym.name()));
-												op_explain[o].rel_name = rel_sym.name();
-											} else {
-												// Add as reference -- TODO: Handle weak symbols
-												sym.refs.insert(rel_sym.value());
-											}
-										}
-									} else {
-										sym.refs.insert(target);
-									}
 								} else {
 									hashbuf.push(op.mem);
 								}
@@ -648,39 +637,32 @@ struct Bean {
 							cout << ops[o] << "\e[0m";
 						}
 
-						// Pretty print target
-						auto print_target = [&symbols, &sections](uintptr_t value) {
-							cout << "0x" << hex << value;
-							const auto ref_sym = symbols.floor(value);
-							if (ref_sym && (ref_sym->name != nullptr)) {
-								cout << " <";
-								if (ref_sym->name != nullptr)
-									cout << ref_sym->name;
-								else
-									cout << "0x" << hex << ref_sym->address;
-
-								const auto ref_sec = sections.floor(value);
-								if (ref_sec && strcmp(ref_sym->name, ref_sec->name()) != 0)
-									cout << '@' << ref_sec->name();
-
-								if (ref_sym->address != value)
-									cout << " + " << dec << (value - ref_sym->address);
-								cout << '>';
-							}
-						};
-
 						// Additional information for reference operands
 						for (int o = 0; o < detail_x86.op_count; o++) {
 							auto & op = op_explain[o];
 							if (op.value != 0) {
 								cout << "  # ";
-								print_target(op.value);
-								if (op.relocation && op.value != op.rel_value) {
+								dump_address(cout, op.value, symbols, sections);
+
+								// Check if target is a relocated value (GOT)
+								const auto relocation = relocations.find(op.value);
+								if (relocation != relocations.end()) {
+									assert(relocation->valid());
+
 									cout << " \e[3m[";
-									if (op.rel_name != nullptr)
-										cout << op.rel_name;
-									else
-										print_target(op.rel_value);
+									if (relocation->symbol_index() == 0) {
+										// No Symbol - calculate target value and add as reference
+										dump_address(cout, Relocator(*relocation).value(0), symbols, sections);
+									} else {
+										// Get relocation symbol
+										const auto rel_sym = relocation->symbol();
+										if (rel_sym.section_index() == Elf::SHN_UNDEF)
+											cout << rel_sym.name();
+										else
+											cout << "0x" << hex << rel_sym.value();
+										if (relocation->addend() != 0)
+											cout << " + " << dec << relocation->addend();
+									}
 									cout << "]\e[0m";
 								}
 							}
@@ -711,10 +693,16 @@ struct Bean {
 					id.addZeros(sym.size);  // bss
 
 				if (explain) {
+					const size_t bytes_per_line = 16;
+					// relocations
 					auto rel = sym.rels.lowest();
 					bool had_rel = false;
 					size_t rel_end = 0;
-					const size_t bytes_per_line = 16;
+
+					// ASCII representation
+					int is_ascii = 0;
+					char ascii[bytes_per_line * 2] = {};
+					size_t ascii_size = 0;
 					for (size_t a = Math::align_down(address, bytes_per_line); a < Math::align_up(address + sym.size, bytes_per_line); a++) {
 						if (a % bytes_per_line == 0)
 							cout << "0x" << setfill('0') << setw(16) << right << hex << a << (a < rel_end ? "\e[33;4m" : "\e[33m");
@@ -722,6 +710,7 @@ struct Bean {
 							if (rel && a == rel_end)
 								cout << "\e[0m";
 							cout << "   ";
+							ascii[ascii_size++] = ' ';
 						} else {
 							if (rel && a == rel_end) {
 								cout << "\e[0;33m ";
@@ -735,9 +724,19 @@ struct Bean {
 								had_rel = true;
 								rel_end = rel->offset + Relocator<Elf::Relocation>::size(rel->type, elf.header.machine());
 							}
-							cout << setw(2) << static_cast<int>(section->type() != Elf::SHT_NOBITS ? data[a - address] : 0);
+							int val = static_cast<int>(section->type() != Elf::SHT_NOBITS ? data[a - address] : 0);
+							cout << setw(2) << val;
+							if (val >= 32 && val < 127) {
+								ascii[ascii_size++] = static_cast<char>(val);
+								is_ascii++;
+								if (val == 92)
+									ascii[ascii_size++] = '\\';
+							} else {
+								is_ascii--;
+								ascii[ascii_size++] = ' ';
+							}
 						}
-						if ((a + 1) % bytes_per_line == 0 && a > address) {
+						if ((a + 1) % bytes_per_line == 0) {
 							cout << "\e[0m";
 							if (had_rel) {
 								cout << "  #";
@@ -746,20 +745,26 @@ struct Bean {
 									if (r->name != nullptr) {
 										cout << r->name;
 										if (r->addend != 0)
-											cout << " + " << r->addend;
+											cout << " + " << dec << r->addend;
 									} else {
-										cout << r->addend;
+										dump_address(cout, resolve_internal_relocations ? r->target : r->addend, symbols, sections);
 									}
 									cout << "\e[0m";
 								}
 
 								// TODO List all rels
 								had_rel = false;
+							} else if (is_ascii > 0) {
+								cout << "  \e[3m# ";
+								cout.write(ascii, ascii_size);
+								cout << "\e[0m";
 							}
+							is_ascii = 0;
+							ascii_size = 0;
 							cout << endl;
 						}
 					}
-					cout << endl << endl;
+					cout << endl;
 				}
 			}
 
