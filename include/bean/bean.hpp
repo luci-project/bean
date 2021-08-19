@@ -210,6 +210,11 @@ struct Bean {
 						}
 				}
 
+				if (id != 0) {
+					cout << "  ID: " << setfill('0') << hex << setw(16) << id
+					     << ' ' << setfill('0') << hex << setw(16) << id_ref << endl;
+				}
+
 				cout << endl;
 			}
 
@@ -690,7 +695,7 @@ struct Bean {
 										// Inside symbol?
 										if (target >= sym.address && target < sym.address + sym.size) {
 											// same symbol, hence just hash
-											hashbuf.push(target);
+											hashbuf.push(target - sym.address);
 										} else {
 											// other symbol, add reference
 											sym.refs.insert(target);
