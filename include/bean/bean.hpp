@@ -4,6 +4,7 @@
 #include <dlh/container/tree.hpp>
 #include <dlh/container/vector.hpp>
 #include <dlh/stream/output.hpp>
+#include <dlh/stream/buffer.hpp>
 #include <dlh/utils/bytebuffer.hpp>
 #include <dlh/utils/iterator.hpp>
 #include <dlh/utils/string.hpp>
@@ -15,6 +16,13 @@
 #include <elfo/elf_rel.hpp>
 
 struct Bean {
+	enum Verbosity : uint8_t {
+		NONE,
+		VERBOSE,
+		DEBUG,
+		TRACE
+	};
+
 	struct SymbolRelocation {
 		uintptr_t offset;
 		uintptr_t type;
@@ -43,7 +51,12 @@ struct Bean {
 		}
 	};
 
+	struct Symbol;
 	struct SymbolComparison;
+
+	typedef HashSet<Symbol, SymbolComparison> symhash_t;
+	typedef TreeSet<Symbol, SymbolComparison> symtree_t;
+	typedef Vector<Pair<uintptr_t, size_t>> memarea_t;
 
 	struct Symbol {
 		/*! \brief Start (virtual) address */
@@ -53,13 +66,19 @@ struct Bean {
 		size_t size;
 
 		/*! \brief Symbol name (for debugging) */
-		const char * name; // TODO: Remove (use debug)
+		const char * name;
 
-		/*! \brief Flag for executable symbol */
-		bool executable = false;
+		/*! \brief Section information */
+		struct Section {
+			/*! \brief Section name (for debugging) */
+			const char * name = nullptr;
 
-		/*! \brief Flag for writable symbol */
-		bool writeable = false;
+			/*! \brief Flag for writable symbol */
+			bool writeable = false;
+
+			/*! \brief Flag for executable symbol */
+			bool executable = false;
+		} section;
 
 		/*! \brief Identifier based on instructions (without refs / rels) */
 		uint64_t id;
@@ -67,7 +86,7 @@ struct Bean {
 		/*! \brief Refs & and Rels identifier */
 		uint64_t id_ref;
 
-		/*! \brief Formatted content (for debugging) */
+		/*! \brief Formatted content */
 		const char * debug;
 
 		/*! \brief Symbol ids using this symbol
@@ -80,28 +99,120 @@ struct Bean {
 		/*! \brief Relocations affecting this symbol */
 		TreeSet<SymbolRelocation, SymbolComparison> rels;
 
-		Symbol(uintptr_t address, size_t size, const char * name = nullptr) : address(address), size(size), name(name), id(0), id_ref(0), debug(nullptr)  {}
+		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable)
+		  : address(address), size(size), name(name), section({section_name, writeable, executable}), id(0), id_ref(0), debug(nullptr) {}
+
 		Symbol(const Symbol &) = default;
 		Symbol(Symbol &&) = default;
 		Symbol & operator=(const Symbol &) = default;
 		Symbol & operator=(Symbol &&) = default;
 
-		static void dump_header() {
-			cout << "ID               ID refs          [Ref / Rel / Dep] - Address              Size Fl Name" << endl;
+		static void dump_header(Verbosity level = VERBOSE) {
+			if (level <= VERBOSE) {
+				cout << "ID               ID refs";
+				if (level == VERBOSE)
+					cout << "          [Ref / Rel / Dep] - Address              Size Fl Name (Section)";
+				cout << endl;
+			}
 		}
 
-		void dump(bool verbose = false) const {
-			cout << setfill('0') << hex
-				 << setw(16) << id << ' '
-				 << setw(16) << id_ref
-				 << setfill(' ') << dec;
-			if (verbose)
-				cout << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
-				     << "0x" << setw(16) << setfill('0') << hex << address
-				     << dec << setw(7) << setfill(' ') << right << size << ' '
-				     << (writeable ? 'W' : ' ') << (executable ? 'X' : ' ')
-				     << ' ' << name;
-			cout << endl;
+		void dump(Verbosity level = VERBOSE, const symtree_t * symbols = nullptr) const {
+			if (level <= VERBOSE) {
+				cout << setfill('0') << hex
+					 << setw(16) << id << ' '
+					 << setw(16) << id_ref
+					 << setfill(' ') << dec;
+				if (level == VERBOSE) {
+					cout << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
+					     << "0x" << setw(16) << setfill('0') << hex << address
+					     << dec << setw(7) << setfill(' ') << right << size << ' '
+					     << (section.writeable ? 'W' : ' ') << (section.executable ? 'X' : ' ');
+					if (name != nullptr)
+						cout << ' ' << name;
+					if (section.name != nullptr)
+						cout << " (" << section.name << ')';
+				}
+				cout << endl;
+			} else {
+				if (name != nullptr && name[0] != '\0')
+					cout << "\e[1m" << name << "\e[0m (";
+				else
+					cout << "unnamed ";
+
+				cout << dec << size << " bytes @ 0x"
+				     << hex << address;
+
+				if (section.name != nullptr)
+					cout << ", " << section.name;
+
+				cout << " [r" << (section.writeable ? 'w' : '-') << (section.executable ? 'x' : '-') << ']';
+				if (name != nullptr && name[0] != '\0')
+					cout << ')';
+				if (debug != nullptr || refs.size() > 0 || rels.size() > 0 || deps.size() > 0)
+					cout << ':';
+				cout << endl;
+
+				if (debug != nullptr)
+					cout << debug;
+
+				if (refs.size() > 0) {
+					cout << "  " << dec << refs.size() << " Reference";
+					if (refs.size() != 1)
+						cout << 's';
+					cout << endl;
+					if (level >= TRACE)
+						for (const auto ref : refs) {
+							if (symbols == nullptr) {
+								cout << "     0x" << hex << ref << endl;
+							} else {
+								cout << "     ";
+								dump_address(cout, ref, *symbols);
+								cout << endl;
+							}
+						}
+				}
+
+				if (rels.size() > 0) {
+					cout << "  " << dec << rels.size() << " Relocation";
+					if (rels.size() != 1)
+						cout << 's';
+					cout << endl;
+					if (level >= TRACE)
+						for (const auto & rel : rels) {
+							cout << "     *0x" << hex << rel.offset << " = ";
+							if (!rel.undefined)
+								cout << "\e[3m";
+							if (rel.name != 0) {
+
+								cout << rel.name;
+								if (rel.addend != 0)
+									cout << " + " << dec << rel.addend;
+							} else {
+								cout << "0x" << hex << rel.addend;
+							}
+							if (!rel.undefined)
+								cout << "\e[0m";
+							cout << endl;
+						}
+				}
+
+				if (deps.size() > 0) {
+					cout << "  " << dec << deps.size() << " depending on this" << endl;
+					if (level >= TRACE)
+						for (const auto dep : deps) {
+							if (symbols == nullptr) {
+								cout << "     0x" << hex << dep << endl;
+							} else {
+								cout << "     ";
+								dump_address(cout, dep, *symbols);
+								cout << endl;
+							}
+						}
+				}
+
+				cout << endl;
+			}
+
 		}
 
 		bool operator==(const Symbol & that) const {
@@ -140,35 +251,30 @@ struct Bean {
 		static inline bool equal(const T& a, const U& b) { return compare(a, b) == 0; }
 	};
 
-	typedef HashSet<Symbol, SymbolComparison> symhash_t;
-	typedef TreeSet<Symbol, SymbolComparison> symtree_t;
-	typedef Vector<Pair<uintptr_t, size_t>> memarea_t;
-
 	const Elf & elf;
 	const symtree_t symbols;
 
-	explicit Bean(const Elf & elf, bool resolve_internal_relocations = true, bool explain = false) : elf(elf), symbols(analyze(elf, resolve_internal_relocations, explain)) {}
+	explicit Bean(const Elf & elf, bool resolve_internal_relocations = true, bool debug = false) : elf(elf), symbols(analyze(elf, resolve_internal_relocations, debug)) {}
 
-	void dump(bool verbose = false) const {
+	void dump(Verbosity level = NONE) const {
 		auto foo = *symbols.highest();
-		dump(symbols, verbose);
+		dump(symbols, level);
 	}
 
-	static void dump(const symtree_t & symbols, bool verbose = false) {
-		if (verbose)
-			Symbol::dump_header();
+	static void dump(const symtree_t & symbols, Verbosity level = NONE) {
+		Symbol::dump_header(level);
 		for (const auto & sym : symbols)
-			sym.dump(verbose);
+			sym.dump(level, &symbols);
 	}
 
-	static void dump(const symhash_t & symbols, bool verbose = false) {
-		if (verbose) {
+	static void dump(const symhash_t & symbols, Verbosity level = NONE) {
+		if (level > NONE) {
 			// Sort output by address
-			dump(symtree_t(symbols), verbose);
+			dump(symtree_t(symbols), level);
 		} else {
 			// unsorted
 			for (const auto & sym: symbols)
-				sym.dump(verbose);
+				sym.dump(level);
 		}
 	}
 
@@ -279,19 +385,18 @@ struct Bean {
 		}
 	}
 
-	static void dump_address(BufferStream & bs, uintptr_t value, const symtree_t & symbols, const TreeSet<Elf::Section, SymbolComparison> & sections) {
+	static void dump_address(BufferStream & bs, uintptr_t value, const symtree_t & symbols) {
 		bs << "0x" << hex << value;
 		const auto ref_sym = symbols.floor(value);
-		if (ref_sym && (ref_sym->name != nullptr)) {
+		if (ref_sym) {
 			bs << " <";
 			if (ref_sym->name != nullptr)
 				bs << ref_sym->name;
 			else
 				bs << "0x" << hex << ref_sym->address;
 
-			const auto ref_sec = sections.floor(value);
-			if (ref_sec && strcmp(ref_sym->name, ref_sec->name()) != 0)
-				bs << '@' << ref_sec->name();
+			if (ref_sym->section.name != nullptr)
+				bs << '@' << ref_sym->section.name;
 
 			if (ref_sym->address != value)
 				bs << " + " << dec << (value - ref_sym->address);
@@ -299,11 +404,16 @@ struct Bean {
 		}
 	}
 
-	static void insert_symbol(symtree_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr) {
+	static void insert_symbol(symtree_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false) {
 		auto pos = symbols.find(address);
 		if (!pos) {
-			symbols.emplace(address, size, name);
+			symbols.emplace(address, size, name, section_name, writeable, executable);
 		} else {
+			if (pos->section.name == nullptr && section_name != nullptr) {
+				pos->section.name = section_name;
+				pos->section.writeable = writeable;
+				pos->section.executable = executable;
+			}
 			const auto max_address = Math::max(pos->address + pos->size, address + size);
 			bool new_name = name != nullptr &&  (pos->name == nullptr || pos->name[0] == '\0');
 			if (address < pos->address) {
@@ -321,12 +431,12 @@ struct Bean {
 		}
 	}
 
-	static symtree_t analyze(const Elf &elf, bool resolve_internal_relocations, bool explain) {
+	static symtree_t analyze(const Elf &elf, bool resolve_internal_relocations, bool debug, size_t buffer_size = 1048576) {
 		symtree_t symbols;
 		TreeSet<Elf::Section, SymbolComparison> sections;
 		TreeSet<Elf::Relocation, SymbolComparison> relocations;
 
-		uintptr_t global_offset_table = 0;
+		uintptr_t global_offset_table = 0; // TODO: Determine value (from segments)
 
 		// 1. Read symbols and segments
 		for (const auto & section: elf.sections) {
@@ -352,12 +462,15 @@ struct Bean {
 								break;
 
 							default:
+							{
+								auto sym_sec = elf.sections[sym.section_index()];
 								if (sym.type() != Elf::STT_NOTYPE) {
-									assert(sym.value() >= elf.sections[sym.section_index()].virt_addr());
-									assert(sym.value() + sym.size() <= elf.sections[sym.section_index()].virt_addr() + elf.sections[sym.section_index()].size());
+									assert(sym.value() >= sym_sec.virt_addr());
+									assert(sym.value() + sym.size() <= sym_sec.virt_addr() + sym_sec.size());
 								}
 								if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
-									insert_symbol(symbols, sym.value(), sym.size(), sym.name());
+									insert_symbol(symbols, sym.value(), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
+							}
 						}
 					}
 					break;
@@ -372,14 +485,14 @@ struct Bean {
 			switch (rel.type()) {
 				case Elf::R_X86_64_RELATIVE:
 				case Elf::R_X86_64_RELATIVE64:
-					insert_symbol(symbols, rel.addend());
+				{
+					auto sec = sections.floor(static_cast<uintptr_t>(rel.addend()));
+					assert(sec);
+					insert_symbol(symbols, rel.addend(), 0, nullptr, sec->name(), sec->writeable(), sec->executable());
+				}
 				default:
 					break;
 			}
-
-		const size_t elf_symbols = symbols.size();
-		if (explain)
-			cout << "\e[3mElf contains " << sections.size() << " sections with definitions of " << elf_symbols << " unqiue symbols and " << relocations.size() << " relocations\e[0m" << endl;
 
 		// Prepare disassemble
 		csh cshandle;
@@ -396,14 +509,14 @@ struct Bean {
 			// Add section start
 			uintptr_t address = section.virt_addr();
 			size_t size = section.size();
-			insert_symbol(symbols, address, 0, section.name());
+			insert_symbol(symbols, address, 0, nullptr, section.name(), section.writeable(), section.executable());
 
 			// Find calls in exec
 			if (section.executable()) {
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
 
 				// For better readability, name the PLT functions
-				bool plt_name = explain && strncmp(section.name(), ".plt.", 5) == 0;
+				bool plt_name = debug && strncmp(section.name(), ".plt.", 5) == 0;
 
 				// start of current function
 				uintptr_t start = address;
@@ -447,8 +560,11 @@ struct Bean {
 									auto pos = symbols.find(start);
 									if (pos)
 										pos->name = name;
-									else
-										symbols.emplace(start, address - start, name);
+									else {
+										auto sec = sections.floor(start);
+										assert(sec);
+										symbols.emplace(start, address - start, name, sec->name(), sec->writeable(), sec->executable());
+									}
 								}
 								break;
 
@@ -467,7 +583,7 @@ struct Bean {
 								// Only in executable sections
 								const auto section = sections.floor(target);
 								if (section && section->executable())
-									insert_symbol(symbols, target);
+									insert_symbol(symbols, target, 0, nullptr, section->name(), section->writeable(), true);
 
 								break;
 							}
@@ -480,299 +596,336 @@ struct Bean {
 			}
 		}
 
-		if (explain)
-			cout << "\e[3mFound " << symbols.size() << " unqiue symbols in machine code (+" << (symbols.size() - elf_symbols) << " compared to definition)\e[0m" << endl;
-
 		// 3. Disassemble again...
-		size_t last_addr = SIZE_MAX;
-		ByteBuffer<128> hashbuf;
-		for (auto & sym : reverse(symbols)) {
-			const auto section = sections.floor(sym);
-			assert(section);
+		{
+			// Prepare temporary stream buffer (used in debug mode only)
+			char * debug_buffer = nullptr;
+			if (debug) {
+				debug_buffer = reinterpret_cast<char*>(malloc(buffer_size));
+				assert(debug_buffer != nullptr);
+			}
+			BufferStream debug_stream(debug_buffer, buffer_size);
 
-			// Set symbol flags
-			sym.executable = section->executable();
-			sym.writeable = section->writeable();
+			// Iterate over all symbols
+			size_t last_addr = SIZE_MAX;
+			ByteBuffer<128> hashbuf;
+			// TODO: Detect missing ret/hlt
+			for (auto & sym : reverse(symbols)) {
+				const auto section = sections.floor(sym);
+				assert(section);
 
-			// 3a. calculate size (if 0), TODO: ignore nops!
-			const size_t max_addr = Math::min(last_addr, section->virt_addr() + section->size());
-			uintptr_t address = sym.address;
-			assert(max_addr >= address);
-			const size_t max_size = max_addr - address;
-			if (max_size > sym.size)
-				sym.size = max_size;
+				// Set symbol section flags
+				if (sym.section.name == nullptr) {
+					sym.section.name = section->name();
+					sym.section.executable = section->executable();
+					sym.section.writeable = section->writeable();
+				}
 
-			if (explain)
-				cout << endl << "\e[1m" << sym.name << "\e[0m (" << section->name() << ", " << dec << sym.size << " bytes)" << endl;
+				// 3a. calculate size (if 0), TODO: ignore nops!
+				const size_t max_addr = Math::min(last_addr, section->virt_addr() + section->size());
+				uintptr_t address = sym.address;
+				assert(max_addr >= address);
+				const size_t max_size = max_addr - address;
+				if (max_size > sym.size)
+					sym.size = max_size;
 
-			// 3b. generate links (from jmp + call) & hash
-			const size_t offset = address - section->virt_addr();
-			const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
-			XXHash64 id(0);  // TODO seed
-			if (sym.executable) {
-				size_t size = sym.size;
-				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
-					if (insn->id == X86_INS_NOP)
-						continue;
+				// 3b. generate links (from jmp + call) & hash
+				const size_t offset = address - section->virt_addr();
+				const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
+				XXHash64 id(0);  // TODO seed
+				if (sym.section.executable) {
+					size_t size = sym.size;
+					while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
+						if (insn->id == X86_INS_NOP)
+							continue;
 
-					// Buffer for id hash
-					hashbuf.clear();
-					hashbuf.push(insn->id);  // Instruction ID (Idea: Different call instructions are no issue for comparison - TODO: Is this sufficient)
+						// Buffer for id hash
+						hashbuf.clear();
+						hashbuf.push(insn->id);  // Instruction ID (Idea: Different call instructions are no issue for comparison - TODO: Is this sufficient)
 
-					auto & detail_x86 = insn->detail->x86;
-					// Check Prefix bytes
-					size_t prefix_size = 0;
-					for (int p = 0; p < 4; p++)
-						if (detail_x86.prefix[p] == 0)
-							break;
-						else
-							prefix_size += hashbuf.push(detail_x86.prefix[p]);
-
-					// Has REX prefix? (do not hash, since it only affects ops)
-					if (detail_x86.rex != 0)
-						prefix_size++;
-
-					// Check Opcode bytes
-					size_t opcode_size = 0;
-					for (int o = 0; o < 4; o++)
-						if (detail_x86.opcode[o] == 0)
-							break;
-						else
-							opcode_size += hashbuf.push(detail_x86.opcode[o]);
-
-					// Helper for explain
-					int explain_ignore = 255;
-					struct {
-						bool hashed = true;
-						bool relocation = false;
-						uintptr_t value = 0;
-					} op_explain[detail_x86.op_count];
-
-					// Handle operands
-					for (int o = 0; o < detail_x86.op_count; o++) {
-						auto & op = detail_x86.operands[o];
-
-						switch (op.type) {
-							case X86_OP_REG:
-								hashbuf.push(op.reg);
+						auto & detail_x86 = insn->detail->x86;
+						// Check Prefix bytes
+						size_t prefix_size = 0;
+						for (int p = 0; p < 4; p++)
+							if (detail_x86.prefix[p] == 0)
 								break;
+							else
+								prefix_size += hashbuf.push(detail_x86.prefix[p]);
 
-							case X86_OP_IMM:
-							{
-								const auto target = static_cast<uintptr_t>(op.imm);
-								if (branch_relative(insn->id)) {
-									op_explain[o].value = target;
+						// Has REX prefix? (do not hash, since it only affects ops)
+						if (detail_x86.rex != 0)
+							prefix_size++;
 
-									// Inside symbol?
-									if (target >= sym.address && target < sym.address + sym.size) {
-										// same symbol, hence just hash
+						// Check Opcode bytes
+						size_t opcode_size = 0;
+						for (int o = 0; o < 4; o++)
+							if (detail_x86.opcode[o] == 0)
+								break;
+							else
+								opcode_size += hashbuf.push(detail_x86.opcode[o]);
+
+						// Helper for debug
+						int debug_ignore = 255;
+						struct {
+							bool hashed = true;
+							bool relocation = false;
+							uintptr_t value = 0;
+						} op_debug[detail_x86.op_count];
+
+						// Handle operands
+						for (int o = 0; o < detail_x86.op_count; o++) {
+							auto & op = detail_x86.operands[o];
+
+							switch (op.type) {
+								case X86_OP_REG:
+									hashbuf.push(op.reg);
+									break;
+
+								case X86_OP_IMM:
+								{
+									const auto target = static_cast<uintptr_t>(op.imm);
+									if (branch_relative(insn->id)) {
+										op_debug[o].value = target;
+
+										// Inside symbol?
+										if (target >= sym.address && target < sym.address + sym.size) {
+											// same symbol, hence just hash
+											hashbuf.push(target);
+										} else {
+											// other symbol, add reference
+											sym.refs.insert(target);
+											op_debug[o].hashed = false;
+										}
+									} else {
 										hashbuf.push(target);
-									} else {
-										// other symbol, add reference
+									}
+									break;
+								}
+
+								case X86_OP_MEM:
+									// TODO: segment handling?
+									if (op.mem.base == X86_REG_RIP) {
+										const auto target = insn->address + insn->size + op.mem.disp;
 										sym.refs.insert(target);
-										op_explain[o].hashed = false;
-									}
-								} else {
-									hashbuf.push(target);
-								}
-								break;
-							}
 
-							case X86_OP_MEM:
-								// TODO: segment handling?
-								if (op.mem.base == X86_REG_RIP) {
-									const auto target = insn->address + insn->size + op.mem.disp;
-									sym.refs.insert(target);
-
-									op_explain[o].hashed = false;
-									op_explain[o].value = static_cast<uintptr_t>(target);
-								} else {
-									hashbuf.push(op.mem);
-								}
-								break;
-
-							default:
-								break;
-						}
-
-						if (explain_ignore > o && !op_explain[o].hashed) {
-							explain_ignore = o;
-							if (o == 0 && detail_x86.modrm != 0)
-								explain_ignore++;
-						}
-					}
-
-					if (explain) {
-						cout << "0x" << setfill('0') << setw(16) << right << hex << insn->address;
-						int op = 0;
-						size_t op_size = 0;
-						for (size_t i = 0; i < 12; i++) {
-							if (i < insn->size) {
-								cout << ' ';
-								if (i < prefix_size)
-									cout << "\e[34;3m";
-								else if (i < prefix_size + opcode_size)
-									cout << "\e[34m";
-								else if (i >= prefix_size + opcode_size + explain_ignore)
-									// This is not necessarly accurate - depending on the encoding
-									// however it is only for hash visualization, the real hash uses the disassembled inormation instead of the machine code bytes
-									cout << "\e[35m";
-								else
-									cout << "\e[36m";
-								cout << setw(2) << static_cast<int>(insn->bytes[i]) << "\e[0m";
-							} else {
-								cout << "   ";
-							}
-						}
-						cout << "\e[34m" << insn->mnemonic << "\e[0m ";
-						auto ops = String::split(insn->op_str, ',');
-						//assert(ops.size() == detail_x86.op_count);
-						for (int o = 0; o < detail_x86.op_count; o++) {
-							if (o > 0)
-								cout << "\e[36m,";
-							if (!op_explain[o].hashed)
-								cout << "\e[35m";
-							else if (o == 0)
-								cout << "\e[36m";
-							cout << ops[o] << "\e[0m";
-						}
-
-						// Additional information for reference operands
-						for (int o = 0; o < detail_x86.op_count; o++) {
-							auto & op = op_explain[o];
-							if (op.value != 0) {
-								cout << "  # ";
-								dump_address(cout, op.value, symbols, sections);
-
-								// Check if target is a relocated value (GOT)
-								const auto relocation = relocations.find(op.value);
-								if (relocation != relocations.end()) {
-									assert(relocation->valid());
-
-									cout << " \e[3m[";
-									if (relocation->symbol_index() == 0) {
-										// No Symbol - calculate target value and add as reference
-										dump_address(cout, Relocator(*relocation).value(0), symbols, sections);
+										op_debug[o].hashed = false;
+										op_debug[o].value = static_cast<uintptr_t>(target);
 									} else {
-										// Get relocation symbol
-										const auto rel_sym = relocation->symbol();
-										if (rel_sym.section_index() == Elf::SHN_UNDEF)
-											cout << rel_sym.name();
-										else
-											cout << "0x" << hex << rel_sym.value();
-										if (relocation->addend() != 0)
-											cout << " + " << dec << relocation->addend();
+										hashbuf.push(op.mem);
 									}
-									cout << "]\e[0m";
-								}
+									break;
+
+								default:
+									break;
+							}
+
+							if (debug_ignore > o && !op_debug[o].hashed) {
+								debug_ignore = o;
+								if (o == 0 && detail_x86.modrm != 0)
+									debug_ignore++;
 							}
 						}
-						cout << endl;
+
+						if (debug) {
+							debug_stream << setfill(' ') << setw(16) << prefix << right << hex << insn->address << ' ' << setfill('0') << noprefix;
+							int op = 0;
+							size_t op_size = 0;
+							for (size_t i = 0; i < 12; i++) {
+								if (i < insn->size) {
+									debug_stream << ' ';
+									if (i < prefix_size)
+										debug_stream << "\e[34;3m";
+									else if (i < prefix_size + opcode_size)
+										debug_stream << "\e[34m";
+									else if (i >= prefix_size + opcode_size + debug_ignore)
+										// This is not necessarly accurate - depending on the encoding
+										// however it is only for hash visualization, the real hash uses the disassembled inormation instead of the machine code bytes
+										debug_stream << "\e[35m";
+									else
+										debug_stream << "\e[36m";
+									debug_stream << setw(2) << static_cast<int>(insn->bytes[i]) << "\e[0m";
+								} else {
+									debug_stream << "   ";
+								}
+							}
+							debug_stream << "\e[34m" << insn->mnemonic << "\e[0m ";
+							auto ops = String::split(insn->op_str, ',');
+							for (int o = 0; o < detail_x86.op_count; o++) {
+								if (o > 0)
+									debug_stream << "\e[36m,";
+								if (!op_debug[o].hashed)
+									debug_stream << "\e[35m";
+								else if (o == 0)
+									debug_stream << "\e[36m";
+								debug_stream << ops[o] << "\e[0m";
+							}
+
+							// Additional information for reference operands
+							bool hashtag = false;
+							for (int o = 0; o < detail_x86.op_count; o++) {
+								auto & op = op_debug[o];
+								if (op.value != 0) {
+									debug_stream << (hashtag ? "  " : "  # ");
+									hashtag = true;
+									if (op.hashed)
+										debug_stream << "\e[3m";
+									dump_address(debug_stream, op.value, symbols);
+									if (op.hashed)
+										debug_stream << "\e[0m";
+
+									// Check if target is a relocated value (GOT)
+									const auto relocation = relocations.find(op.value);
+									if (relocation != relocations.end()) {
+										assert(relocation->valid());
+
+										debug_stream << " \e[3m[";
+										if (relocation->symbol_index() == 0) {
+											// No Symbol - calculate target value and add as reference
+											dump_address(debug_stream, Relocator(*relocation).value(0), symbols);
+										} else {
+											// Get relocation symbol
+											const auto rel_sym = relocation->symbol();
+											if (rel_sym.section_index() == Elf::SHN_UNDEF)
+												debug_stream << rel_sym.name();
+											else
+												debug_stream << "0x" << hex << rel_sym.value();
+											if (relocation->addend() != 0)
+												debug_stream << " + " << dec << relocation->addend();
+										}
+										debug_stream << "]\e[0m";
+									}
+								}
+							}
+							debug_stream << endl;
+						}
+
+						// add instruction hash buffer to hash
+						id.add(hashbuf.buffer(), hashbuf.size());
+					}
+				} else {
+					// 3c. Link relocations to (data) symbols
+					for (auto relocation = relocations.ceil(sym); relocation != relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
+						auto r = sym.rels.emplace(*relocation, resolve_internal_relocations, global_offset_table);
+						// Add local (internal) relocation as reference
+						if (r.second && resolve_internal_relocations && !r.first->undefined)
+							sym.refs.insert(r.first->target);
 					}
 
-					// add instruction hash buffer to hash
-					id.add(hashbuf.buffer(), hashbuf.size());
-				}
-			} else {
-				// 3c. Link relocations to (data) symbols
-				for (auto relocation = relocations.ceil(sym); relocation != relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
-					auto r = sym.rels.emplace(*relocation, resolve_internal_relocations, global_offset_table);
-					// Add local (internal) relocation as reference
-					if (r.second && resolve_internal_relocations && !r.first->undefined)
-						sym.refs.insert(r.first->target);
-				}
+					// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
+					if (sym.section.writeable)
+						id.add<uint32_t>(address & 0xfff);  // Assuming 4k page size, TODO: detect (Segments!)
 
-				// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
-				if (sym.writeable)
-					id.add<uint32_t>(address & 0xfff);  // Assuming 4k page size, TODO: detect (Segments!)
+					// Non-executable objects will be fully hashed
+					if (section->type() != Elf::SHT_NOBITS)
+						id.add(data, sym.size);
+					else
+						id.addZeros(sym.size);  // bss
 
-				// Non-executable objects will be fully hashed
-				if (section->type() != Elf::SHT_NOBITS)
-					id.add(data, sym.size);
-				else
-					id.addZeros(sym.size);  // bss
+					if (debug && sym.size > 0) {
+						const size_t bytes_per_line = 16;
+						// relocations
+						auto rel = sym.rels.lowest();
+						bool had_rel = false;
+						size_t rel_end = 0;
 
-				if (explain) {
-					const size_t bytes_per_line = 16;
-					// relocations
-					auto rel = sym.rels.lowest();
-					bool had_rel = false;
-					size_t rel_end = 0;
-
-					// ASCII representation
-					int is_ascii = 0;
-					char ascii[bytes_per_line * 2] = {};
-					size_t ascii_size = 0;
-					for (size_t a = Math::align_down(address, bytes_per_line); a < Math::align_up(address + sym.size, bytes_per_line); a++) {
-						if (a % bytes_per_line == 0)
-							cout << "0x" << setfill('0') << setw(16) << right << hex << a << (a < rel_end ? "\e[33;4m" : "\e[33m");
-						if (a < address || a >= address + sym.size) {
-							if (rel && a == rel_end)
-								cout << "\e[0m";
-							cout << "   ";
-							ascii[ascii_size++] = ' ';
-						} else {
-							if (rel && a == rel_end) {
-								cout << "\e[0;33m ";
-								rel_end = 0;
-								++rel;
-							} else {
-								cout << ' ';
-							}
-							if (rel && a == rel->offset) {
-								cout << "\e[33;4m";
-								had_rel = true;
-								rel_end = rel->offset + Relocator<Elf::Relocation>::size(rel->type, elf.header.machine());
-							}
-							int val = static_cast<int>(section->type() != Elf::SHT_NOBITS ? data[a - address] : 0);
-							cout << setw(2) << val;
-							if (val >= 32 && val < 127) {
-								ascii[ascii_size++] = static_cast<char>(val);
-								is_ascii++;
-								if (val == 92)
-									ascii[ascii_size++] = '\\';
-							} else {
-								is_ascii--;
+						// ASCII representation
+						int is_ascii = 0;
+						char ascii[bytes_per_line * 2] = {};
+						size_t ascii_size = 0;
+						for (size_t a = Math::align_down(address, bytes_per_line); a < Math::align_up(address + sym.size, bytes_per_line); a++) {
+							if (a % bytes_per_line == 0)
+								debug_stream << setfill(' ') << setw(16) << prefix <<  right << hex << a << ' '
+								               << (a < rel_end ? "\e[33;4m" : "\e[33m") << setfill('0') << noprefix;
+							if (a < address || a >= address + sym.size) {
+								if (rel && a == rel_end)
+									debug_stream << "\e[0m";
+								debug_stream << "   ";
 								ascii[ascii_size++] = ' ';
-							}
-						}
-						if ((a + 1) % bytes_per_line == 0) {
-							cout << "\e[0m";
-							if (had_rel) {
-								cout << "  #";
-								for (auto r = sym.rels.ceil(a - bytes_per_line); r && r->offset <= a; ++r ) {
-									cout << " \e[4m";
-									if (r->name != nullptr) {
-										cout << r->name;
-										if (r->addend != 0)
-											cout << " + " << dec << r->addend;
-									} else {
-										dump_address(cout, resolve_internal_relocations ? r->target : r->addend, symbols, sections);
-									}
-									cout << "\e[0m";
+							} else {
+								if (rel && a == rel_end) {
+									debug_stream << "\e[0;33m ";
+									rel_end = 0;
+									++rel;
+								} else {
+									debug_stream << ' ';
 								}
-
-								// TODO List all rels
-								had_rel = false;
-							} else if (is_ascii > 0) {
-								cout << "  \e[3m# ";
-								cout.write(ascii, ascii_size);
-								cout << "\e[0m";
+								if (rel && a == rel->offset) {
+									debug_stream << "\e[33;4m";
+									had_rel = true;
+									rel_end = rel->offset + Relocator<Elf::Relocation>::size(rel->type, elf.header.machine());
+								}
+								int val = static_cast<int>(section->type() != Elf::SHT_NOBITS ? data[a - address] : 0);
+								debug_stream << setw(2) << val;
+								if (val >= 32 && val < 127) {
+									ascii[ascii_size++] = static_cast<char>(val);
+									is_ascii++;
+									if (val == 92)
+										ascii[ascii_size++] = '\\';
+								} else {
+									is_ascii--;
+									ascii[ascii_size++] = ' ';
+								}
 							}
-							is_ascii = 0;
-							ascii_size = 0;
-							cout << endl;
+							if ((a + 1) % bytes_per_line == 0) {
+								debug_stream << "\e[0m";
+								if (had_rel) {
+									debug_stream << "  #";
+									for (auto r = sym.rels.ceil(a - bytes_per_line); r && r->offset <= a; ++r ) {
+										debug_stream << " \e[4m";
+										if (r->name != nullptr) {
+											debug_stream << r->name;
+											if (r->addend != 0)
+												debug_stream << " + " << dec << r->addend;
+										} else {
+											dump_address(debug_stream, resolve_internal_relocations ? r->target : r->addend, symbols);
+										}
+										debug_stream << "\e[0m";
+									}
+
+									// TODO List all rels
+									had_rel = false;
+								} else if (is_ascii > 0) {
+									debug_stream << "  \e[3m# ";
+									debug_stream.write(ascii, ascii_size);
+									debug_stream << "\e[0m";
+								}
+								is_ascii = 0;
+								ascii_size = 0;
+								debug_stream << endl;
+							}
 						}
 					}
-					cout << endl;
 				}
+
+				if (debug) {
+					// Duplicate buffer for symbol
+					size_t len = 0;
+					const char * buf = debug_stream.str(len);
+					if (buf != nullptr && len > 0) {
+						char * tmp = reinterpret_cast<char*>(malloc(len + 1));
+						assert(tmp != nullptr);
+						memcpy(tmp, buf, len);
+						tmp[len] = '\0';
+						sym.debug = tmp;
+					}
+					// Clear for next symbol
+					debug_stream.clear();
+				}
+
+				// Calculate has
+				sym.id = id.hash();
+
+				last_addr = sym.address;
 			}
 
-			sym.id = id.hash();
-
-			last_addr = sym.address;
+			// Clear temporary stream buffer
+			if (debug)
+				free(debug_buffer);
 		}
+
+		// Clear instruction buffer
 		cs_free(insn, 1);
+
 
 		// 4. Calculate full id, set dependencies and add to final set
 		for (auto & sym : symbols) {

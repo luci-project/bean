@@ -7,14 +7,14 @@
 int main(int argc, const char *argv[]) {
 	// Check arguments
 	if (argc < 2) {
-		cerr << "Usage: " << argv[0] << "[-r] [-v] [-x] ELF-FILES" << endl;
+		cerr << "Usage: " << argv[0] << "[-r] [-v [-v [-v]]] ELF-FILES" << endl;
 		return EXIT_FAILURE;
 	}
 
 	if (!BeanFile::init())
 		return EXIT_FAILURE;
 
-	bool verbose = false;
+	Bean::Verbosity verbose = Bean::NONE;
 	bool reloc = false;
 	bool explain = false;
 	Vector<BeanFile> files;
@@ -22,11 +22,9 @@ int main(int argc, const char *argv[]) {
 		if (strcmp(argv[i], "-r") == 0)
 			reloc = true;
 		else if (strcmp(argv[i], "-v") == 0)
-			verbose = true;
-		else if (strcmp(argv[i], "-x") == 0)
-			explain = true;
+			verbose = static_cast<Bean::Verbosity>(1 + static_cast<uint8_t>(verbose));
 		else
-			files.emplace_back(argv[i], reloc, explain);
+			files.emplace_back(argv[i], reloc, verbose >= Bean::DEBUG);
 	}
 
 	for (auto & file : files) {
