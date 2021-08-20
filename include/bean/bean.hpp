@@ -211,8 +211,8 @@ struct Bean {
 				}
 
 				if (id != 0) {
-					cout << "  ID: " << setfill('0') << hex << setw(16) << id
-					     << ' ' << setfill('0') << hex << setw(16) << id_ref << endl;
+					cout << "  \e[1mID: " << setfill('0') << hex << setw(16) << id
+					     << ' ' << setfill('0') << hex << setw(16) << id_ref << "\e[0m" << endl;
 				}
 
 				cout << endl;
@@ -441,7 +441,7 @@ struct Bean {
 		TreeSet<Elf::Section, SymbolComparison> sections;
 		TreeSet<Elf::Relocation, SymbolComparison> relocations;
 
-		uintptr_t global_offset_table = 0; // TODO: Determine value (from segments)
+		uintptr_t global_offset_table = 0;
 
 		// 1. Read symbols and segments
 		for (const auto & section: elf.sections) {
@@ -458,7 +458,7 @@ struct Bean {
 
 				case Elf::SHT_SYMTAB:
 				case Elf::SHT_DYNSYM:
-					for (auto & sym: section.get_symbols()) {
+					for (const auto & sym: section.get_symbols()) {
 						switch (sym.section_index()) {
 							case Elf::SHN_UNDEF:
 							case Elf::SHN_ABS:
@@ -478,6 +478,17 @@ struct Bean {
 							}
 						}
 					}
+					break;
+
+				case Elf::SHT_DYNAMIC:
+					for (const auto & dyn: section.get_dynamic())
+						switch(dyn.tag()) {
+							case Elf::DT_PLTGOT:
+								global_offset_table = dyn.value();
+								break;
+
+							// TODO: Other entries can be used to insert symbol borders
+						}
 					break;
 
 				default:
@@ -625,6 +636,9 @@ struct Bean {
 					sym.section.executable = section->executable();
 					sym.section.writeable = section->writeable();
 				}
+
+				if (debug && sym.address == global_offset_table)
+					debug_stream << "  \e[3m[the global offset table]\e[0m" << endl;
 
 				// 3a. calculate size (if 0), TODO: ignore nops!
 				const size_t max_addr = Math::min(last_addr, section->virt_addr() + section->size());
