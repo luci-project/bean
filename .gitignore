@@ -1,5 +1,5 @@
 .build/
-hash
 diff
-diffmem
+hash
+update
 *.old
