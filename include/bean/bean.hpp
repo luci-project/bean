@@ -23,6 +23,24 @@ struct Bean {
 		TRACE
 	};
 
+	struct MemArea {
+		/*! \brief Start (virtual) address */
+		uintptr_t address;
+
+		/*! \brief Size */
+		size_t size;
+
+		/*! \brief Flag for writable symbol */
+		bool writeable = false;
+
+		/*! \brief Flag for executable symbol */
+		bool executable = false;
+
+		MemArea(uintptr_t address, size_t size, bool writeable, bool executable)
+		  : address(address), size(size), writeable(writeable), executable(executable) {}
+
+	};
+
 	struct SymbolRelocation {
 		uintptr_t offset;
 		uintptr_t type;
@@ -56,7 +74,7 @@ struct Bean {
 
 	typedef HashSet<Symbol, SymbolComparison> symhash_t;
 	typedef TreeSet<Symbol, SymbolComparison> symtree_t;
-	typedef Vector<Pair<uintptr_t, size_t>> memarea_t;
+	typedef Vector<MemArea> memarea_t;
 
 	struct Symbol {
 		/*! \brief Start (virtual) address */
@@ -288,14 +306,13 @@ struct Bean {
 		memarea_t area;
 		for (const auto & sym : symbols) {
 			if (!area.empty()) {
-				const auto & address = area.back().first;
-				auto & size = area.back().second;
-				if (address + size + threshold >= sym.address) {
-					size = sym.address + sym.size - address;
+				auto & last = area.back();
+				if (last.writeable == sym.section.writeable && last.executable == sym.section.executable &&  last.address + last.size + threshold >= sym.address) {
+					last.size = sym.address + sym.size - last.address;
 					continue;
 				}
 			}
-			area.emplace_back(sym.address, sym.size);
+			area.emplace_back(sym.address, sym.size, sym.section.writeable, sym.section.executable);
 		}
 		return area;
 	}
@@ -901,7 +918,6 @@ struct Bean {
 										debug_stream << "\e[0m";
 									}
 
-									// TODO List all rels
 									had_rel = false;
 								} else if (is_ascii > 0) {
 									debug_stream << "  \e[3m# ";
