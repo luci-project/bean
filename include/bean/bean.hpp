@@ -98,11 +98,32 @@ struct Bean {
 			bool executable = false;
 		} section;
 
-		/*! \brief Identifier based on instructions (without refs / rels) */
-		uint64_t id;
+		/*! \brief Symbol identifier (hash) */
+		struct Identifier {
+			/*! \brief Identifier based on internal instructions (without refs / rels) */
+			uint64_t internal = 0;
 
-		/*! \brief Refs & and Rels identifier */
-		uint64_t id_ref;
+			/*! \brief Identifier based on external Refs & and Rels identifier */
+			uint64_t external = 0;
+
+			/*! \brief ID set? */
+			bool valid() const {
+				// TODO: Not robust!
+				return internal != 0;
+			}
+
+			/*! \brief print ID */
+			void dump(BufferStream& bs) const {
+				bs << '{' << setfill('0') << hex << setw(16) << internal
+				   << ' ' << setfill('0') << hex << setw(16) << external
+				   << '}' << reset;
+			}
+
+			/*! \brief check if ID matches */
+			bool operator==(const Identifier & that) const {
+				return this->internal == that.internal && this->external == that.external;
+			}
+		} id;
 
 		/*! \brief Formatted content */
 		const char * debug;
@@ -118,128 +139,169 @@ struct Bean {
 		TreeSet<SymbolRelocation, SymbolComparison> rels;
 
 		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable)
-		  : address(address), size(size), name(name), section({section_name, writeable, executable}), id(0), id_ref(0), debug(nullptr) {}
+		  : address(address), size(size), name(name), section({section_name, writeable, executable}), debug(nullptr) {}
 
 		Symbol(const Symbol &) = default;
 		Symbol(Symbol &&) = default;
 		Symbol & operator=(const Symbol &) = default;
 		Symbol & operator=(Symbol &&) = default;
 
-		static void dump_header(Verbosity level = VERBOSE) {
+		void dump_name(BufferStream& bs) const {
+			if (name != nullptr && name[0] != '\0')
+				bs << "\e[1m" << name << "\e[21m (";
+			else
+				bs << "unnamed ";
+
+			bs << dec << size << " bytes @ 0x"
+			   << hex << address;
+
+			if (section.name != nullptr)
+				bs << ", " << section.name;
+
+			bs << " [r" << (section.writeable ? 'w' : '-') << (section.executable ? 'x' : '-') << ']';
+			if (name != nullptr && name[0] != '\0')
+				bs << ')';
+		}
+
+		static auto dump_address(BufferStream & bs, uintptr_t value, const symtree_t & symbols) {
+			bs << "0x" << hex << value;
+			const auto ref_sym = symbols.floor(value);
+			if (ref_sym) {
+				bs << " <";
+				if (ref_sym->name != nullptr)
+					bs << ref_sym->name;
+				else
+					bs << "0x" << hex << ref_sym->address;
+
+				if (ref_sym->section.name != nullptr)
+					bs << '@' << ref_sym->section.name;
+
+				if (ref_sym->address != value)
+					bs << " + " << dec << (value - ref_sym->address);
+				bs << '>';
+			}
+			return ref_sym;
+		}
+
+		static void dump_header(BufferStream & bs, Verbosity level = VERBOSE) {
 			if (level <= VERBOSE) {
-				cout << "ID               ID refs";
+				bs << "{ID               ID refs         }";
 				if (level == VERBOSE)
-					cout << "          [Ref / Rel / Dep] - Address              Size Fl Name (Section)";
-				cout << endl;
+					bs << " [Ref / Rel / Dep] - Address              Size Fl Name (Section)";
+				bs << endl;
 			}
 		}
 
-		void dump(Verbosity level = VERBOSE, const symtree_t * symbols = nullptr) const {
+		void dump(BufferStream & bs, Verbosity level = VERBOSE, const symtree_t * symbols = nullptr, const char * prefix = nullptr) const {
+			bs << prefix;
 			if (level <= VERBOSE) {
-				cout << setfill('0') << hex
-					 << setw(16) << id << ' '
-					 << setw(16) << id_ref
-					 << setfill(' ') << dec;
+				id.dump(bs);
 				if (level == VERBOSE) {
-					cout << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
-					     << "0x" << setw(16) << setfill('0') << hex << address
-					     << dec << setw(7) << setfill(' ') << right << size << ' '
-					     << (section.writeable ? 'W' : ' ') << (section.executable ? 'X' : ' ');
-					if (name != nullptr)
-						cout << ' ' << name;
+					bs << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
+					   << "0x" << setw(16) << setfill('0') << hex << address
+					   << dec << setw(7) << setfill(' ') << right << size << ' '
+					   << (section.writeable ? 'W' : ' ') << (section.executable ? 'X' : ' ');
+					if (name != nullptr && name[0] != '\0')
+						bs << ' ' << name;
 					if (section.name != nullptr)
-						cout << " (" << section.name << ')';
+						bs << " (" << section.name << ')';
 				}
-				cout << endl;
+				bs << endl;
 			} else {
-				if (name != nullptr && name[0] != '\0')
-					cout << "\e[1m" << name << "\e[0m (";
-				else
-					cout << "unnamed ";
+				dump_name(bs);
 
-				cout << dec << size << " bytes @ 0x"
-				     << hex << address;
-
-				if (section.name != nullptr)
-					cout << ", " << section.name;
-
-				cout << " [r" << (section.writeable ? 'w' : '-') << (section.executable ? 'x' : '-') << ']';
-				if (name != nullptr && name[0] != '\0')
-					cout << ')';
 				if (debug != nullptr || refs.size() > 0 || rels.size() > 0 || deps.size() > 0)
-					cout << ':';
-				cout << endl;
+					bs << ':';
+				bs << endl;
 
-				if (debug != nullptr)
-					cout << debug;
+				if (debug != nullptr) {
+					size_t i, s = 0;
+					do {
+						for (i = s; debug[i] != '\0' && debug[i] != '\n'; i++);
+						if (i > s) {
+							bs << prefix;
+							bs.write(debug + s, i - s + 1);
+							s = i + 1;
+						}
+					} while (debug[i] != '\0');
+				}
 
 				if (refs.size() > 0) {
-					cout << "  " << dec << refs.size() << " Reference";
+					bs << prefix << "  " << dec << refs.size() << " Reference";
 					if (refs.size() != 1)
-						cout << 's';
-					cout << endl;
+						bs << 's';
+					bs << endl;
 					if (level >= TRACE)
 						for (const auto ref : refs) {
 							if (symbols == nullptr) {
-								cout << "     0x" << hex << ref << endl;
+								bs << prefix << "     0x" << hex << ref << endl;
 							} else {
-								cout << "     ";
-								dump_address(cout, ref, *symbols);
-								cout << endl;
+								bs << prefix << "     ";
+								auto ref_sym = dump_address(cout, ref, *symbols);
+								if (ref_sym->id.valid()) {
+									bs << ' ';
+									ref_sym->id.dump(bs);
+								}
+								bs << endl;
 							}
 						}
 				}
 
 				if (rels.size() > 0) {
-					cout << "  " << dec << rels.size() << " Relocation";
+					bs << prefix << "  " << dec << rels.size() << " Relocation";
 					if (rels.size() != 1)
-						cout << 's';
-					cout << endl;
+						bs << 's';
+					bs << endl;
 					if (level >= TRACE)
 						for (const auto & rel : rels) {
-							cout << "     *0x" << hex << rel.offset << " = ";
+							bs << prefix << "     *0x" << hex << rel.offset << " = ";
 							if (!rel.undefined)
-								cout << "\e[3m";
+								bs << "\e[3m";
 							if (rel.name != 0) {
-
-								cout << rel.name;
+								bs << rel.name;
 								if (rel.addend != 0)
-									cout << " + " << dec << rel.addend;
+									bs << " + " << dec << rel.addend;
 							} else {
-								cout << "0x" << hex << rel.addend;
+								bs << "0x" << hex << rel.addend;
 							}
 							if (!rel.undefined)
-								cout << "\e[0m";
-							cout << endl;
+								bs << "\e[23m";
+							bs << endl;
 						}
 				}
 
 				if (deps.size() > 0) {
-					cout << "  " << dec << deps.size() << " depending on this" << endl;
+					bs << prefix << "  " << dec << deps.size() << " depending on this" << endl;
 					if (level >= TRACE)
 						for (const auto dep : deps) {
 							if (symbols == nullptr) {
-								cout << "     0x" << hex << dep << endl;
+								bs << prefix << "     0x" << hex << dep << endl;
 							} else {
-								cout << "     ";
-								dump_address(cout, dep, *symbols);
-								cout << endl;
+								bs << prefix << "     ";
+								auto ref_sym = dump_address(cout, dep, *symbols);
+								if (ref_sym->id.valid()) {
+									bs << ' ';
+									ref_sym->id.dump(bs);
+								}
+								bs << endl;
 							}
 						}
 				}
 
-				if (id != 0) {
-					cout << "  \e[1mID: " << setfill('0') << hex << setw(16) << id
-					     << ' ' << setfill('0') << hex << setw(16) << id_ref << "\e[0m" << endl;
+				if (id.valid()) {
+					bs << prefix << "  \e[1mID: ";
+					id.dump(bs);
+					bs << "\e[21m" << endl;
 				}
 
-				cout << endl;
+				bs << endl;
 			}
 
 		}
 
 		bool operator==(const Symbol & that) const {
-			return this->id == that.id && this->id_ref == that.id_ref && this->refs.size() == that.refs.size() && this->deps.size() == that.deps.size();
+			return this->id == that.id;
+			//return this->id == that.id && this->id_ref == that.id_ref; && this->refs.size() == that.refs.size() && this->deps.size() == that.deps.size();
 		}
 	};
 
@@ -268,7 +330,7 @@ struct Bean {
 		static inline int compare(uintptr_t lhs, const SymbolRelocation & rhs) { return Comparison::compare(lhs, rhs.offset); }
 		static inline int compare(const SymbolRelocation & lhs, uintptr_t rhs) { return Comparison::compare(lhs.offset, rhs); }
 
-		static inline uint32_t hash(const Symbol& sym) { return Comparison::hash(sym.id ^ sym.id_ref); }
+		static inline uint32_t hash(const Symbol& sym) { return Comparison::hash(sym.id.internal ^ sym.id.external); }
 
 		template<typename T, typename U>
 		static inline bool equal(const T& a, const U& b) { return compare(a, b) == 0; }
@@ -279,25 +341,25 @@ struct Bean {
 
 	explicit Bean(const Elf & elf, bool resolve_internal_relocations = true, bool debug = false) : elf(elf), symbols(analyze(elf, resolve_internal_relocations, debug)) {}
 
-	void dump(Verbosity level = NONE) const {
+	void dump(BufferStream & bs, Verbosity level = NONE) const {
 		auto foo = *symbols.highest();
-		dump(symbols, level);
+		dump(bs, symbols, level);
 	}
 
-	static void dump(const symtree_t & symbols, Verbosity level = NONE) {
-		Symbol::dump_header(level);
+	static void dump(BufferStream & bs, const symtree_t & symbols, Verbosity level = NONE) {
+		Symbol::dump_header(bs, level);
 		for (const auto & sym : symbols)
-			sym.dump(level, &symbols);
+			sym.dump(bs, level, &symbols);
 	}
 
-	static void dump(const symhash_t & symbols, Verbosity level = NONE) {
+	static void dump(BufferStream & bs, const symhash_t & symbols, Verbosity level = NONE) {
 		if (level > NONE) {
 			// Sort output by address
-			dump(symtree_t(symbols), level);
+			dump(bs, symtree_t(symbols), level);
 		} else {
 			// unsorted
 			for (const auto & sym: symbols)
-				sym.dump(level);
+				sym.dump(bs, level);
 		}
 	}
 
@@ -404,25 +466,6 @@ struct Bean {
 
 			default:
 				return false;
-		}
-	}
-
-	static void dump_address(BufferStream & bs, uintptr_t value, const symtree_t & symbols) {
-		bs << "0x" << hex << value;
-		const auto ref_sym = symbols.floor(value);
-		if (ref_sym) {
-			bs << " <";
-			if (ref_sym->name != nullptr)
-				bs << ref_sym->name;
-			else
-				bs << "0x" << hex << ref_sym->address;
-
-			if (ref_sym->section.name != nullptr)
-				bs << '@' << ref_sym->section.name;
-
-			if (ref_sym->address != value)
-				bs << " + " << dec << (value - ref_sym->address);
-			bs << '>';
 		}
 	}
 
@@ -668,7 +711,7 @@ struct Bean {
 				// 3b. generate links (from jmp + call) & hash
 				const size_t offset = address - section->virt_addr();
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
-				XXHash64 id(0);  // TODO seed
+				XXHash64 id_internal(0);  // TODO seed
 				if (sym.section.executable) {
 					size_t size = sym.size;
 					while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
@@ -805,7 +848,7 @@ struct Bean {
 									hashtag = true;
 									if (op.hashed)
 										debug_stream << "\e[3m";
-									dump_address(debug_stream, op.value, symbols);
+									Symbol::dump_address(debug_stream, op.value, symbols);
 									if (op.hashed)
 										debug_stream << "\e[0m";
 
@@ -817,7 +860,7 @@ struct Bean {
 										debug_stream << " \e[3m[";
 										if (relocation->symbol_index() == 0) {
 											// No Symbol - calculate target value and add as reference
-											dump_address(debug_stream, Relocator(*relocation).value(0), symbols);
+											Symbol::dump_address(debug_stream, Relocator(*relocation).value(0), symbols);
 										} else {
 											// Get relocation symbol
 											const auto rel_sym = relocation->symbol();
@@ -836,7 +879,7 @@ struct Bean {
 						}
 
 						// add instruction hash buffer to hash
-						id.add(hashbuf.buffer(), hashbuf.size());
+						id_internal.add(hashbuf.buffer(), hashbuf.size());
 					}
 				} else {
 					// 3c. Link relocations to (data) symbols
@@ -849,13 +892,13 @@ struct Bean {
 
 					// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
 					if (sym.section.writeable)
-						id.add<uint32_t>(address & 0xfff);  // Assuming 4k page size, TODO: detect (Segments!)
+						id_internal.add<uint32_t>(address & 0xfff);  // Assuming 4k page size, TODO: detect (Segments!)
 
 					// Non-executable objects will be fully hashed
 					if (section->type() != Elf::SHT_NOBITS)
-						id.add(data, sym.size);
+						id_internal.add(data, sym.size);
 					else
-						id.addZeros(sym.size);  // bss
+						id_internal.addZeros(sym.size);  // bss
 
 					if (debug && sym.size > 0) {
 						const size_t bytes_per_line = 16;
@@ -913,7 +956,7 @@ struct Bean {
 											if (r->addend != 0)
 												debug_stream << " + " << dec << r->addend;
 										} else {
-											dump_address(debug_stream, resolve_internal_relocations ? r->target : r->addend, symbols);
+											Symbol::dump_address(debug_stream, resolve_internal_relocations ? r->target : r->addend, symbols);
 										}
 										debug_stream << "\e[0m";
 									}
@@ -948,7 +991,7 @@ struct Bean {
 				}
 
 				// Calculate has
-				sym.id = id.hash();
+				sym.id.internal = id_internal.hash();
 
 				last_addr = sym.address;
 			}
@@ -965,30 +1008,43 @@ struct Bean {
 		// 4. Calculate full id, set dependencies and add to final set
 		for (auto & sym : symbols) {
 			if (sym.rels.size() > 0 || sym.refs.size() > 0 ) {
-				XXHash64 id_ref(0);  // TODO seed
+				XXHash64 id_external(0);  // TODO seed
 				// Relocations
 				for (const auto rel : sym.rels) {
-					id_ref.add<uintptr_t>(rel.offset);
-					id_ref.add<uintptr_t>(rel.type);
-					id_ref.add(rel.name, strlen(rel.name));
-					id_ref.add<uintptr_t>(rel.addend);
+					id_external.add<uintptr_t>(rel.offset);
+					id_external.add<uintptr_t>(rel.type);
+					id_external.add(rel.name, strlen(rel.name));
+					id_external.add<uintptr_t>(rel.addend);
 				}
 				// References
 				for (const auto ref : sym.refs) {
 					auto ref_sym = symbols.floor(ref);
 					if (ref_sym) {
 						// Hash ID and offset
-						id_ref.add<uint64_t>(ref_sym->id);
-						id_ref.add<uint64_t>(ref - ref_sym->address);
+						id_external.add<uint64_t>(ref_sym->id.internal);
+						id_external.add<uint64_t>(ref - ref_sym->address);
 						ref_sym->deps.insert(sym.address);
 					} else {
 						// TODO
 					}
 				}
-				sym.id_ref = id_ref.hash();
+				sym.id.external = id_external.hash();
 			}
 		}
 
 		return symbols;
 	}
 };
+
+static inline BufferStream& operator<<(BufferStream& bs, const Bean::Symbol & sym) {
+	sym.dump_name(bs);
+	return bs;
+}
+
+static inline BufferStream& operator<<(BufferStream& bs, const Bean::Symbol::Identifier & id) {
+	if (id.valid())
+		id.dump(bs);
+	else
+		bs << "{\e[3munknown ID\e23m}";
+	return bs;
+}

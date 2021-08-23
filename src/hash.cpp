@@ -35,7 +35,7 @@ int main(int argc, const char *argv[]) {
 		} else {
 			BeanFile file(argv[i], reloc, verbose >= Bean::DEBUG);
 			cout << "# " << file.path << " (" << file.size << " bytes):" << endl;
-			file.bean.dump(verbose);
+			file.bean.dump(cout, verbose);
 			cout << endl;
 		}
 	}

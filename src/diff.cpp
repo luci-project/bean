@@ -1,12 +1,16 @@
 #include <dlh/stream/output.hpp>
+#include <dlh/utils/string.hpp>
 #include <dlh/string.hpp>
 
 #include "beanfile.hpp"
 
 int main(int argc, const char *argv[]) {
-	unsigned verbose = 0;
+	Bean::Verbosity verbose = Bean::NONE;
+
 	bool dependencies = false;
-	bool sections = false;
+	bool reloc = false;
+	const char * old_path = nullptr;
+	const char * new_path = nullptr;
 	BeanFile * a = nullptr;
 	BeanFile * b = nullptr;
 
@@ -14,111 +18,60 @@ int main(int argc, const char *argv[]) {
 		return EXIT_FAILURE;
 
 	for (int i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "-v"))
-			verbose = 1;
-		else if (!strcmp(argv[i], "-vv"))
-			verbose = 2;
-		else if (!strcmp(argv[i], "-d"))
+		if (!strcmp(argv[i], "-d")) {
 			dependencies = true;
-		else if (!strcmp(argv[i], "-s"))
-			sections = true;
-		else if (a == nullptr)
-			a = new BeanFile(argv[i]);
-		else if (b == nullptr)
-			b = new BeanFile(argv[i]);
-		else
+		} else if (strcmp(argv[i], "-r") == 0) {
+			reloc = true;
+		} else if (strncmp(argv[i], "-v", 2) == 0) {
+			for (size_t j = 1; argv[i][j] != '\0'; j++) {
+				if (argv[i][j] == 'v') {
+					verbose = static_cast<Bean::Verbosity>(1 + static_cast<uint8_t>(verbose));
+				} else {
+					cerr << "Unsupported parameter '" << argv[i] << endl;
+					return EXIT_FAILURE;
+				}
+			}
+		} else if (argv[i][0] == '-') {
+			cerr << "Unsupported parameter '" << argv[i] << endl;
+			return EXIT_FAILURE;
+		} else if (old_path == nullptr) {
+			old_path = argv[i];
+		} else if (new_path == nullptr) {
+			new_path = argv[i];
+		} else {
 			cerr << "Ignoring argument " << argv[i] << endl;
+		}
 	}
 
-	if (b == nullptr) {
-		delete a;
-		cerr << "Usage: " << argv[0] << "[-v[v]] [-d] [-s] OLD NEW" << endl;
+	if (new_path == nullptr) {
+		cerr << "Usage: " << argv[0] << "[-d] [-s] [-v[v]] OLD NEW" << endl;
 		return EXIT_FAILURE;
 	}
 
-	auto & diff = b->bean.diff(a->bean, dependencies);
-	if (sections) {
-		cout << "File " << b->path << endl;
-		for (const auto & section : b->bean.elf.sections) {
-			cout << "\e[1m"
-			          << "[" << b->bean.elf.sections.index(section) << "] "
-			          << section.name()
-			          << "\e[0m";
-			if (section.allocate()) {
-				cout << " @ 0x" << hex << section.virt_addr()
-				          << " (" << dec << section.size() << " Bytes)"
-				          << " A";
+	BeanFile old_file(old_path, reloc, verbose >= Bean::DEBUG);
+	BeanFile new_file(new_path, reloc, verbose >= Bean::DEBUG);
+
+	auto & diff = new_file.bean.diff(old_file.bean, dependencies);
+
+	if (verbose == Bean::NONE)
+		Bean::dump(cout, diff);
+	else {
+		auto removed = Bean::symtree_t(old_file.bean.diff(new_file.bean, dependencies));
+		auto rnext = removed.begin();
+		for (const auto & n : new_file.bean) {
+			while (rnext != removed.end() && rnext->address <= n.address) {
+				rnext->dump(cout, verbose, &old_file.bean.symbols, "\e[31m-");
+				++rnext;
+			}
+			bool dbg = false;
+			if (diff.contains(n)) {
+				n.dump(cout, verbose, &new_file.bean.symbols, "\e[32m+");
 			} else {
-				cout << endl;
-				continue;
+				n.dump(cout, Bean::VERBOSE, &new_file.bean.symbols, "\e[0m ");
 			}
-			if (section.writeable())
-				cout << "W";
-			if (section.executable())
-				cout << "X";
-			cout << ":" << endl;
-
-			size_t i = 0, m = 0;
-			const auto begin = b->bean.find(section.virt_addr());
-			const auto end = b->bean.find(section.virt_addr() + section.size());
-			for (auto it = begin; it != end; ++it) {
-				cout << "\e[0m  ";
-				if (diff.contains(*it)) {
-					cout << "\e[33m";
-					m++;
-				}
-				cout << flush;
-				it->dump(verbose != 0);
-				if (verbose == 2) {
-					// refs
-					bool header = false;
-					for (const auto raddress : it->refs) {
-						cout << (!header ? "      using " : "            ");
-						header = true;
-						auto rsym = b->bean.get(raddress);
-
-						if (rsym == nullptr) {
-							cout << "0x" << hex << raddress << dec << " [unresolved]";
-						} else {
-							cout << "0x" << hex << rsym->address << dec;
-							if (raddress != rsym->address)
-								cout << " + " << (raddress - rsym->address);
-							if (rsym->name != nullptr)
-								cout << " (" << rsym->name << ")";
-						}
-						cout << endl;
-					}
-					// deps
-					header = false;
-					for (const auto daddress : it->deps) {
-						cout << (!header ? "    used by " : "            ");
-						header = true;
-						auto dsym = b->bean.get(daddress);
-
-						if (dsym == nullptr) {
-							cout << "0x" << hex << daddress << dec << " [unresolved]";
-						} else {
-							cout << "0x" << hex << dsym->address << dec;
-							if (dsym->name != nullptr)
-								cout << " (" << dsym->name << ")";
-						}
-						cout << endl;
-					}
-					cout << endl;
-				}
-				i++;
-			}
-
-			cout << "\e[0m(" << i << " symbols";
-			if (m > 0)
-				cout << ", \e[33m" << m << " modified\e[0m";
-			cout << ")" << endl << endl;
 		}
-	} else {
-		Bean::dump(diff, verbose != 0);
+		cout << "\e[0m";
 	}
 
-	delete a;
-	delete b;
 	return EXIT_SUCCESS;
 }

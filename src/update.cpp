@@ -64,7 +64,7 @@ int main(int argc, const char *argv[]) {
 	cout << "# Changes at update of "
 	     << old_file.path << " (" << old_file.size << " bytes) with "
 	     << new_file.path << " (" << new_file.size << " bytes)" << endl;
-	Bean::dump(diff, verbose);
+	Bean::dump(cout, diff, verbose);
 	cout << endl;
 
 	if (merge) {
