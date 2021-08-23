@@ -70,10 +70,11 @@ struct Bean {
 	};
 
 	struct Symbol;
-	struct SymbolComparison;
+	struct SymbolAddressComparison;
+	struct SymbolIdentifierComparison;
 
-	typedef HashSet<Symbol, SymbolComparison> symhash_t;
-	typedef TreeSet<Symbol, SymbolComparison> symtree_t;
+	typedef TreeSet<Symbol, SymbolAddressComparison> symtree_t;
+	typedef HashSet<Symbol, SymbolIdentifierComparison> symhash_t;
 	typedef Vector<MemArea> memarea_t;
 
 	struct Symbol {
@@ -136,7 +137,7 @@ struct Bean {
 		HashSet<uintptr_t> refs;
 
 		/*! \brief Relocations affecting this symbol */
-		TreeSet<SymbolRelocation, SymbolComparison> rels;
+		TreeSet<SymbolRelocation, SymbolAddressComparison> rels;
 
 		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable)
 		  : address(address), size(size), name(name), section({section_name, writeable, executable}), debug(nullptr) {}
@@ -300,15 +301,12 @@ struct Bean {
 		}
 
 		bool operator==(const Symbol & that) const {
-			return this->id == that.id;
-			//return this->id == that.id && this->id_ref == that.id_ref; && this->refs.size() == that.refs.size() && this->deps.size() == that.deps.size();
+			return this->id == that.id && this->refs.size() == that.refs.size() && this->deps.size() == that.deps.size();
 		}
 	};
 
-	struct SymbolComparison: public Comparison {
+	struct SymbolAddressComparison: public Comparison {
 		using Comparison::compare;
-		using Comparison::equal;
-		using Comparison::hash;
 
 		static inline int compare(const Symbol & lhs, const Symbol & rhs) { return Comparison::compare(lhs.address, rhs.address); }
 		static inline int compare(uintptr_t lhs, const Symbol & rhs) { return Comparison::compare(lhs, rhs.address); }
@@ -329,11 +327,15 @@ struct Bean {
 		static inline int compare(const SymbolRelocation & lhs, const SymbolRelocation & rhs) { return Comparison::compare(lhs.offset, rhs.offset); }
 		static inline int compare(uintptr_t lhs, const SymbolRelocation & rhs) { return Comparison::compare(lhs, rhs.offset); }
 		static inline int compare(const SymbolRelocation & lhs, uintptr_t rhs) { return Comparison::compare(lhs.offset, rhs); }
+	};
+
+	struct SymbolIdentifierComparison: public Comparison {
+		using Comparison::equal;
+		using Comparison::hash;
 
 		static inline uint32_t hash(const Symbol& sym) { return Comparison::hash(sym.id.internal ^ sym.id.external); }
 
-		template<typename T, typename U>
-		static inline bool equal(const T& a, const U& b) { return compare(a, b) == 0; }
+		static inline bool equal(const Symbol & lhs, const Symbol & rhs) { return lhs == rhs; }
 	};
 
 	const Elf & elf;
@@ -498,8 +500,8 @@ struct Bean {
 
 	static symtree_t analyze(const Elf &elf, bool resolve_internal_relocations, bool debug, size_t buffer_size = 1048576) {
 		symtree_t symbols;
-		TreeSet<Elf::Section, SymbolComparison> sections;
-		TreeSet<Elf::Relocation, SymbolComparison> relocations;
+		TreeSet<Elf::Section, SymbolAddressComparison> sections;
+		TreeSet<Elf::Relocation, SymbolAddressComparison> relocations;
 
 		uintptr_t global_offset_table = 0;
 
