@@ -4,6 +4,8 @@
 
 #include "beanfile.hpp"
 
+TreeSet<const char *> ignore_writeable = { ".eh_frame_hdr", ".eh_frame", ".dynamic", ".data.rel.ro"};
+
 int main(int argc, const char *argv[]) {
 	Bean::Verbosity verbose = Bean::NONE;
 
@@ -81,9 +83,8 @@ int main(int argc, const char *argv[]) {
 		}
 	}
 
-
 	for (const auto & d : diff) {
-		if (d.section.writeable) {
+		if (d.section.writeable && !ignore_writeable.contains(d.section.name)) {
 			cerr << "# Writeable sections have changed - not updateable..." << endl;
 			return EXIT_FAILURE;
 		}
