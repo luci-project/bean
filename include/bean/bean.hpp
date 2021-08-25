@@ -599,7 +599,7 @@ struct Bean {
 				// start of current function
 				uintptr_t start = address;
 
-				// was the last instruction a return?
+				// was the last instruction a return (or other)?
 				bool ret = false;
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
 					i++;
@@ -608,6 +608,13 @@ struct Bean {
 					switch (insn->id) {
 						case X86_INS_NOP:
 							continue;
+
+						case X86_INS_JMP:
+						case X86_INS_HLT:
+						case X86_INS_SYSEXIT:
+						case X86_INS_SYSRET:
+							ret = true;
+							break;
 
 						case X86_INS_ENDBR32:
 						case X86_INS_ENDBR64:
@@ -666,6 +673,7 @@ struct Bean {
 								break;
 							}
 							case CS_GRP_RET:
+							case CS_GRP_IRET:
 								ret = true;
 								break;
 						}
@@ -687,7 +695,7 @@ struct Bean {
 			// Iterate over all symbols
 			size_t last_addr = SIZE_MAX;
 			ByteBuffer<128> hashbuf;
-			// TODO: Detect missing ret/hlt
+
 			for (auto & sym : reverse(symbols)) {
 				const auto section = sections.floor(sym);
 				assert(section);
@@ -716,9 +724,31 @@ struct Bean {
 				XXHash64 id_internal(0);  // TODO seed
 				if (sym.section.executable) {
 					size_t size = sym.size;
+					bool leave = true;
+					size_t last_instruction = address;
+					size_t max_branch = address;
 					while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
-						if (insn->id == X86_INS_NOP)
-							continue;
+						switch (insn->id) {
+							case X86_INS_NOP:
+								continue;
+							case X86_INS_JMP:
+							case X86_INS_LJMP:
+							case X86_INS_RET:
+							case X86_INS_RETF:
+							case X86_INS_RETFQ:
+							case X86_INS_HLT:
+							// Rare
+							case X86_INS_IRET:
+							case X86_INS_IRETD:
+							case X86_INS_IRETQ:
+							case X86_INS_SYSEXIT:
+							case X86_INS_SYSRET:
+								leave = true;
+								break;
+							default:
+								leave = false;
+						}
+						last_instruction = address;  // Ignores nop
 
 						// Buffer for id hash
 						hashbuf.clear();
@@ -770,6 +800,7 @@ struct Bean {
 
 										// Inside symbol?
 										if (target >= sym.address && target < sym.address + sym.size) {
+											max_branch = target;
 											// same symbol, hence just hash
 											hashbuf.push(target - sym.address);
 										} else {
@@ -882,6 +913,13 @@ struct Bean {
 
 						// add instruction hash buffer to hash
 						id_internal.add(hashbuf.buffer(), hashbuf.size());
+					}
+
+					// If it doesn't end with a leave instruction (ret), or a branch jumps beyond it, we have to link it to the next function (fallthrough)
+					if (!leave || max_branch > last_instruction) {
+						auto next = symbols.ceil(sym.address + sym.size);
+						assert(next);
+						sym.refs.insert(next->address);
 					}
 				} else {
 					// 3c. Link relocations to (data) symbols
