@@ -1,8 +1,8 @@
 #pragma once
 
+#include <dlh/container/vector.hpp>
 #include <dlh/container/hash.hpp>
 #include <dlh/container/tree.hpp>
-#include <dlh/container/vector.hpp>
 #include <dlh/stream/output.hpp>
 #include <dlh/stream/buffer.hpp>
 #include <dlh/utils/bytebuffer.hpp>
@@ -16,6 +16,9 @@
 #include <elfo/elf_rel.hpp>
 
 struct Bean {
+	/*! \brief Address flag for TLS address */
+	static const uintptr_t TLS_ADDRESS_FLAG = 0xf0000000000000;
+
 	enum Verbosity : uint8_t {
 		NONE,
 		VERBOSE,
@@ -131,9 +134,9 @@ struct Bean {
 
 		/*! \brief Symbol ids using this symbol
 		 */
-		HashSet<uintptr_t> deps;
+		HashSet<uint64_t> deps;
 
-		/*! \brief Reference of used symbols */
+		/*! \brief Reference of used symbols (first = address, second = TLS?) */
 		HashSet<uintptr_t> refs;
 
 		/*! \brief Relocations affecting this symbol */
@@ -148,6 +151,8 @@ struct Bean {
 		Symbol & operator=(Symbol &&) = default;
 
 		void dump_name(BufferStream& bs) const {
+			if (address & Bean::TLS_ADDRESS_FLAG)
+				bs << "TLS:";
 			if (name != nullptr && name[0] != '\0')
 				bs << "\e[1m" << name << "\e[21m (";
 			else
@@ -165,14 +170,19 @@ struct Bean {
 		}
 
 		static auto dump_address(BufferStream & bs, uintptr_t value, const symtree_t & symbols) {
-			bs << "0x" << hex << value;
+			if ((value & Bean::TLS_ADDRESS_FLAG) != 0)
+				bs << "TLS:";
+			bs << "0x" << hex << (value & ~Bean::TLS_ADDRESS_FLAG);
 			const auto ref_sym = symbols.floor(value);
 			if (ref_sym) {
 				bs << " <";
 				if (ref_sym->name != nullptr)
 					bs << ref_sym->name;
-				else
-					bs << "0x" << hex << ref_sym->address;
+				else {
+					if ((ref_sym->address & Bean::TLS_ADDRESS_FLAG) != 0)
+						bs << "TLS:";
+					bs << "0x" << hex << (ref_sym->address & ~Bean::TLS_ADDRESS_FLAG);;
+				}
 
 				if (ref_sym->section.name != nullptr)
 					bs << '@' << ref_sym->section.name;
@@ -188,7 +198,7 @@ struct Bean {
 			if (level <= VERBOSE) {
 				bs << "{ID               ID refs         }";
 				if (level == VERBOSE)
-					bs << " [Ref / Rel / Dep] - Address              Size Fl Name (Section)";
+					bs << " [Ref / Rel / Dep] - Address              Size Flg Name (Section)";
 				bs << endl;
 			}
 		}
@@ -199,9 +209,9 @@ struct Bean {
 				id.dump(bs);
 				if (level == VERBOSE) {
 					bs << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
-					   << "0x" << setw(16) << setfill('0') << hex << address
+					   << "0x" << setw(16) << setfill('0') << hex << (address & ~Bean::TLS_ADDRESS_FLAG)
 					   << dec << setw(7) << setfill(' ') << right << size << ' '
-					   << (section.writeable ? 'W' : ' ') << (section.executable ? 'X' : ' ');
+					   << (section.writeable ? 'W' : ' ') << (section.executable ? 'X' : ' ') << ((address & Bean::TLS_ADDRESS_FLAG) != 0 ? 'T' : ' ');
 					if (name != nullptr && name[0] != '\0')
 						bs << ' ' << name;
 					if (section.name != nullptr)
@@ -305,28 +315,30 @@ struct Bean {
 		}
 	};
 
-	struct SymbolAddressComparison: public Comparison {
-		using Comparison::compare;
+	struct SymbolAddressComparison {
+		static inline int compare(uintptr_t lhs, uintptr_t rhs) {
+			return (rhs < lhs) - (lhs < rhs);
+		}
 
-		static inline int compare(const Symbol & lhs, const Symbol & rhs) { return Comparison::compare(lhs.address, rhs.address); }
-		static inline int compare(uintptr_t lhs, const Symbol & rhs) { return Comparison::compare(lhs, rhs.address); }
-		static inline int compare(const Symbol & lhs, uintptr_t rhs) { return Comparison::compare(lhs.address, rhs); }
+		static inline int compare(const Symbol & lhs, const Symbol & rhs) { return compare(lhs.address, rhs.address); }
+		static inline int compare(uintptr_t lhs, const Symbol & rhs) { return compare(lhs, rhs.address); }
+		static inline int compare(const Symbol & lhs, uintptr_t rhs) { return compare(lhs.address, rhs); }
 
-		static inline int compare(const Elf::Section & lhs, const Elf::Section & rhs) { return Comparison::compare(lhs.virt_addr(), rhs.virt_addr()); }
-		static inline int compare(const Symbol & lhs, const Elf::Section & rhs) { return Comparison::compare(lhs.address, rhs.virt_addr()); }
-		static inline int compare(const Elf::Section & lhs, const Symbol & rhs) { return Comparison::compare(lhs.virt_addr(), rhs.address); }
-		static inline int compare(uintptr_t lhs, const Elf::Section & rhs) { return Comparison::compare(lhs, rhs.virt_addr()); }
-		static inline int compare(const Elf::Section & lhs, uintptr_t rhs) { return Comparison::compare(lhs.virt_addr(), rhs); }
+		static inline int compare(const Elf::Section & lhs, const Elf::Section & rhs) { return compare(lhs.virt_addr() | (lhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0), rhs.virt_addr() | (rhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0)); }
+		static inline int compare(const Symbol & lhs, const Elf::Section & rhs) { return compare(lhs.address, rhs.virt_addr() | (rhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0)); }
+		static inline int compare(const Elf::Section & lhs, const Symbol & rhs) { return compare(lhs.virt_addr() | (lhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0), rhs.address); }
+		static inline int compare(uintptr_t lhs, const Elf::Section & rhs) { return compare(lhs, rhs.virt_addr() | (rhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0)); }
+		static inline int compare(const Elf::Section & lhs, uintptr_t rhs) { return compare(lhs.virt_addr() | (lhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0), rhs); }
 
-		static inline int compare(const Elf::Relocation & lhs, const Elf::Relocation & rhs) { return Comparison::compare(lhs.offset(), rhs.offset()); }
-		static inline int compare(const Symbol & lhs, const Elf::Relocation & rhs) { return Comparison::compare(lhs.address, rhs.offset()); }
-		static inline int compare(const Elf::Relocation & lhs, const Symbol & rhs) { return Comparison::compare(lhs.offset(), rhs.address); }
-		static inline int compare(uintptr_t lhs, const Elf::Relocation & rhs) { return Comparison::compare(lhs, rhs.offset()); }
-		static inline int compare(const Elf::Relocation & lhs, uintptr_t rhs) { return Comparison::compare(lhs.offset(), rhs); }
+		static inline int compare(const Elf::Relocation & lhs, const Elf::Relocation & rhs) { return compare(lhs.offset(), rhs.offset()); }
+		static inline int compare(const Symbol & lhs, const Elf::Relocation & rhs) { return compare(lhs.address, rhs.offset()); }
+		static inline int compare(const Elf::Relocation & lhs, const Symbol & rhs) { return compare(lhs.offset(), rhs.address); }
+		static inline int compare(uintptr_t lhs, const Elf::Relocation & rhs) { return compare(lhs, rhs.offset()); }
+		static inline int compare(const Elf::Relocation & lhs, uintptr_t rhs) { return compare(lhs.offset(), rhs); }
 
-		static inline int compare(const SymbolRelocation & lhs, const SymbolRelocation & rhs) { return Comparison::compare(lhs.offset, rhs.offset); }
-		static inline int compare(uintptr_t lhs, const SymbolRelocation & rhs) { return Comparison::compare(lhs, rhs.offset); }
-		static inline int compare(const SymbolRelocation & lhs, uintptr_t rhs) { return Comparison::compare(lhs.offset, rhs); }
+		static inline int compare(const SymbolRelocation & lhs, const SymbolRelocation & rhs) { return compare(lhs.offset, rhs.offset); }
+		static inline int compare(uintptr_t lhs, const SymbolRelocation & rhs) { return compare(lhs, rhs.offset); }
+		static inline int compare(const SymbolRelocation & lhs, uintptr_t rhs) { return compare(lhs.offset, rhs); }
 	};
 
 	struct SymbolIdentifierComparison: public Comparison {
@@ -338,10 +350,9 @@ struct Bean {
 		static inline bool equal(const Symbol & lhs, const Symbol & rhs) { return lhs == rhs; }
 	};
 
-	const Elf & elf;
 	const symtree_t symbols;
 
-	explicit Bean(const Elf & elf, bool resolve_internal_relocations = true, bool debug = false) : elf(elf), symbols(analyze(elf, resolve_internal_relocations, debug)) {}
+	explicit Bean(const Elf & elf, bool resolve_internal_relocations = true, bool debug = false) : symbols(analyze(elf, resolve_internal_relocations, debug)) {}
 
 	void dump(BufferStream & bs, Verbosity level = NONE) const {
 		auto foo = *symbols.highest();
@@ -472,15 +483,18 @@ struct Bean {
 	}
 
 	static void insert_symbol(symtree_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false) {
+		cerr << hex << address << " (" << name << ", " << size << "b) " << (writeable ? 'W' : ' ') << (executable  ? 'X' : ' ') << endl;
+		assert(!(executable && writeable));
+		assert(!(executable && (address & Bean::TLS_ADDRESS_FLAG)));
 		auto pos = symbols.find(address);
 		if (!pos) {
 			symbols.emplace(address, size, name, section_name, writeable, executable);
 		} else {
-			if (pos->section.name == nullptr && section_name != nullptr) {
+			if (pos->section.name == nullptr && section_name != nullptr)
 				pos->section.name = section_name;
-				pos->section.writeable = writeable;
-				pos->section.executable = executable;
-			}
+			assert(pos->section.writeable == writeable);
+			assert(pos->section.executable == executable);
+
 			const auto max_address = Math::max(pos->address + pos->size, address + size);
 			bool new_name = name != nullptr &&  (pos->name == nullptr || pos->name[0] == '\0');
 			if (address < pos->address) {
@@ -503,9 +517,33 @@ struct Bean {
 		TreeSet<Elf::Section, SymbolAddressComparison> sections;
 		TreeSet<Elf::Relocation, SymbolAddressComparison> relocations;
 
+		// TODO: TLS refs (fs:[...])
+
+		size_t page_size = 0x1000;
 		uintptr_t global_offset_table = 0;
+		uintptr_t tls_start = 0;
+		uintptr_t tls_end = 0;
 
 		// 1. Read symbols and segments
+
+		// Read Program header table
+		for (const auto & segment: elf.segments) {
+			switch (segment.type()) {
+				case Elf::PT_TLS:
+					tls_start = segment.virt_addr();
+					tls_end = Math::align_up(segment.virt_addr() + segment.virt_size(), segment.alignment());
+					break;
+
+				case Elf::PT_LOAD:
+					if (page_size < segment.alignment())
+						page_size = segment.alignment();
+					break;
+
+				// TODO: Other entries can be used to insert symbol borders
+			}
+		}
+
+
 		for (const auto & section: elf.sections) {
 			if (section.allocate())
 				sections.insert(section);
@@ -531,12 +569,18 @@ struct Bean {
 							default:
 							{
 								auto sym_sec = elf.sections[sym.section_index()];
-								if (sym.type() != Elf::STT_NOTYPE) {
-									assert(sym.value() >= sym_sec.virt_addr());
-									assert(sym.value() + sym.size() <= sym_sec.virt_addr() + sym_sec.size());
+								if (sym.type() == Elf::STT_TLS) {
+									assert(sym_sec.tls());
+									insert_symbol(symbols, (tls_start + sym.value()) | TLS_ADDRESS_FLAG, sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
+								} else {
+									assert((sym.value() & TLS_ADDRESS_FLAG) == 0);
+									if (sym.type() != Elf::STT_NOTYPE) {
+										assert(sym.value() >= sym_sec.virt_addr());
+										assert(sym.value() + sym.size() <= sym_sec.virt_addr() + sym_sec.size());
+									}
+									if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
+										insert_symbol(symbols, sym.value() | (sym_sec.tls() ? TLS_ADDRESS_FLAG : 0), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
 								}
-								if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
-									insert_symbol(symbols, sym.value(), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
 							}
 						}
 					}
@@ -566,6 +610,7 @@ struct Bean {
 				{
 					auto sec = sections.floor(static_cast<uintptr_t>(rel.addend()));
 					assert(sec);
+					assert(!sec->tls());
 					insert_symbol(symbols, rel.addend(), 0, nullptr, sec->name(), sec->writeable(), sec->executable());
 				}
 				default:
@@ -587,7 +632,7 @@ struct Bean {
 			// Add section start
 			uintptr_t address = section.virt_addr();
 			size_t size = section.size();
-			insert_symbol(symbols, address, 0, nullptr, section.name(), section.writeable(), section.executable());
+			insert_symbol(symbols, address | (section.tls() ? TLS_ADDRESS_FLAG : 0), 0, nullptr, section.name(), section.writeable(), section.executable());
 
 			// Find calls in exec
 			if (section.executable()) {
@@ -620,7 +665,7 @@ struct Bean {
 						case X86_INS_ENDBR64:
 							start = insn->address;
 							if (ret) {
-								insert_symbol(symbols, start);
+								insert_symbol(symbols, start | (section.tls() ? TLS_ADDRESS_FLAG : 0), 0, nullptr, section.name(), section.writeable(), section.executable());
 								ret = false;
 							}
 							break;
@@ -648,7 +693,7 @@ struct Bean {
 									else {
 										auto sec = sections.floor(start);
 										assert(sec);
-										symbols.emplace(start, address - start, name, sec->name(), sec->writeable(), sec->executable());
+										symbols.emplace(start, (address - start) | (sec->tls() ? TLS_ADDRESS_FLAG : 0), name, sec->name(), sec->writeable(), sec->executable());
 									}
 								}
 								break;
@@ -668,7 +713,7 @@ struct Bean {
 								// Only in executable sections
 								const auto section = sections.floor(target);
 								if (section && section->executable())
-									insert_symbol(symbols, target, 0, nullptr, section->name(), section->writeable(), true);
+									insert_symbol(symbols, target | (section->tls() ? TLS_ADDRESS_FLAG : 0), 0, nullptr, section->name(), section->writeable(), true);
 
 								break;
 							}
@@ -711,10 +756,10 @@ struct Bean {
 					debug_stream << "  \e[3m[the global offset table]\e[0m" << endl;
 
 				// 3a. calculate size (if 0), TODO: ignore nops!
-				const size_t max_addr = Math::min(last_addr, section->virt_addr() + section->size());
-				uintptr_t address = sym.address;
-				assert(max_addr >= address);
-				const size_t max_size = max_addr - address;
+				const size_t max_addr = Math::min(last_addr, (section->virt_addr() + section->size()) | (section->tls() ? TLS_ADDRESS_FLAG : 0));
+				uintptr_t address = sym.address & ~TLS_ADDRESS_FLAG;
+				assert(max_addr >= sym.address);
+				const size_t max_size = max_addr - sym.address;
 				if (max_size > sym.size)
 					sym.size = max_size;
 
@@ -723,6 +768,7 @@ struct Bean {
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
 				XXHash64 id_internal(0);  // TODO seed
 				if (sym.section.executable) {
+					assert(!section->tls());
 					size_t size = sym.size;
 					bool leave = true;
 					size_t last_instruction = address;
@@ -816,6 +862,13 @@ struct Bean {
 
 								case X86_OP_MEM:
 									// TODO: segment handling?
+									if (op.mem.segment == X86_REG_FS) {
+										const auto target = (tls_end + op.mem.disp) | TLS_ADDRESS_FLAG;
+										sym.refs.insert(target);
+
+										op_debug[o].hashed = false;
+										op_debug[o].value = static_cast<uintptr_t>(target);
+									}
 									if (op.mem.base == X86_REG_RIP) {
 										const auto target = insn->address + insn->size + op.mem.disp;
 										sym.refs.insert(target);
@@ -932,7 +985,7 @@ struct Bean {
 
 					// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
 					if (sym.section.writeable)
-						id_internal.add<uint32_t>(address & 0xfff);  // Assuming 4k page size, TODO: detect (Segments!)
+						id_internal.add<uint32_t>(address % page_size);
 
 					// Non-executable objects will be fully hashed
 					if (section->type() != Elf::SHT_NOBITS)
@@ -953,8 +1006,8 @@ struct Bean {
 						size_t ascii_size = 0;
 						for (size_t a = Math::align_down(address, bytes_per_line); a < Math::align_up(address + sym.size, bytes_per_line); a++) {
 							if (a % bytes_per_line == 0)
-								debug_stream << setfill(' ') << setw(16) << prefix <<  right << hex << a << ' '
-								               << (a < rel_end ? "\e[33;4m" : "\e[33m") << setfill('0') << noprefix;
+								debug_stream << setfill(' ') << setw(16) << prefix << right << hex << a << ' '
+								             << (a < rel_end ? "\e[33;4m" : "\e[33m") << setfill('0') << noprefix;
 							if (a < address || a >= address + sym.size) {
 								if (rel && a == rel_end)
 									debug_stream << "\e[0m";
