@@ -331,8 +331,8 @@ struct Bean {
 		static inline int compare(const Elf::Section & lhs, uintptr_t rhs) { return compare(lhs.virt_addr() | (lhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0), rhs); }
 
 		static inline int compare(const Elf::Relocation & lhs, const Elf::Relocation & rhs) { return compare(lhs.offset(), rhs.offset()); }
-		static inline int compare(const Symbol & lhs, const Elf::Relocation & rhs) { return compare(lhs.address, rhs.offset()); }
-		static inline int compare(const Elf::Relocation & lhs, const Symbol & rhs) { return compare(lhs.offset(), rhs.address); }
+		static inline int compare(const Symbol & lhs, const Elf::Relocation & rhs) { return compare(lhs.address & ~Bean::TLS_ADDRESS_FLAG, rhs.offset()); }
+		static inline int compare(const Elf::Relocation & lhs, const Symbol & rhs) { return compare(lhs.offset(), rhs.address & ~Bean::TLS_ADDRESS_FLAG); }
 		static inline int compare(uintptr_t lhs, const Elf::Relocation & rhs) { return compare(lhs, rhs.offset()); }
 		static inline int compare(const Elf::Relocation & lhs, uintptr_t rhs) { return compare(lhs.offset(), rhs); }
 
@@ -483,7 +483,6 @@ struct Bean {
 	}
 
 	static void insert_symbol(symtree_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false) {
-		cerr << hex << address << " (" << name << ", " << size << "b) " << (writeable ? 'W' : ' ') << (executable  ? 'X' : ' ') << endl;
 		assert(!(executable && writeable));
 		assert(!(executable && (address & Bean::TLS_ADDRESS_FLAG)));
 		auto pos = symbols.find(address);
@@ -975,13 +974,14 @@ struct Bean {
 						sym.refs.insert(next->address);
 					}
 				} else {
-					// 3c. Link relocations to (data) symbols
-					for (auto relocation = relocations.ceil(sym); relocation != relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
-						auto r = sym.rels.emplace(*relocation, resolve_internal_relocations, global_offset_table);
-						// Add local (internal) relocation as reference
-						if (r.second && resolve_internal_relocations && !r.first->undefined)
-							sym.refs.insert(r.first->target);
-					}
+					// 3c. Link relocations to (data) symbols (not for .bss in TLS)
+					if (section->type() != Elf::SHT_NOBITS || !section->tls())
+						for (auto relocation = relocations.ceil(sym); relocation != relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
+							auto r = sym.rels.emplace(*relocation, resolve_internal_relocations, global_offset_table);
+							// Add local (internal) relocation as reference
+							if (r.second && resolve_internal_relocations && !r.first->undefined)
+								sym.refs.insert(r.first->target);
+						}
 
 					// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
 					if (sym.section.writeable)
