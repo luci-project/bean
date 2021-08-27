@@ -16,8 +16,28 @@
 #include <elfo/elf_rel.hpp>
 
 struct Bean {
-	/*! \brief Address flag for TLS address */
-	static const uintptr_t TLS_ADDRESS_FLAG = 0xf0000000000000;
+	/*! \brief To handle TLS symbols, their addresses are extended by an flag, so they can reside in the same address space like the rest
+	 * \note This hack only works if no regular address has the `ADDRESS_FLAG` bit set.
+	 */
+	struct TLS {
+		/*! \brief Flag for TLS address */
+		static const uintptr_t ADDRESS_FLAG = 0xf0000000000000;
+
+		/*! \brief Translated address, having an flag for TLS address space */
+		static inline uintptr_t trans_addr(uintptr_t virt_addr, bool tls) {
+			return virt_addr | (tls ? ADDRESS_FLAG : 0);
+		}
+
+		/*! \brief get virtual address (e.g. used in ELF for relocation) */
+		static inline  uintptr_t virt_addr(uintptr_t trans_addr) {
+			return trans_addr & ~ADDRESS_FLAG;
+		}
+
+		/*! \brief check if translated address is a TLS address  */
+		static inline bool is_tls(uintptr_t trans_addr) {
+			return (trans_addr & ADDRESS_FLAG) != 0;
+		}
+	};
 
 	enum Verbosity : uint8_t {
 		NONE,
@@ -27,7 +47,7 @@ struct Bean {
 	};
 
 	struct MemArea {
-		/*! \brief Start (virtual) address */
+		/*! \brief Start (translated) address */
 		uintptr_t address;
 
 		/*! \brief Size */
@@ -151,7 +171,7 @@ struct Bean {
 		Symbol & operator=(Symbol &&) = default;
 
 		void dump_name(BufferStream& bs) const {
-			if (address & Bean::TLS_ADDRESS_FLAG)
+			if (TLS::is_tls(address))
 				bs << "TLS:";
 			if (name != nullptr && name[0] != '\0')
 				bs << "\e[1m" << name << "\e[21m (";
@@ -170,18 +190,18 @@ struct Bean {
 		}
 
 		static auto dump_address(BufferStream & bs, uintptr_t value, const symtree_t & symbols) {
-			if ((value & Bean::TLS_ADDRESS_FLAG) != 0)
+			if (TLS::is_tls(value))
 				bs << "TLS:";
-			bs << "0x" << hex << (value & ~Bean::TLS_ADDRESS_FLAG);
+			bs << "0x" << hex << TLS::virt_addr(value);
 			const auto ref_sym = symbols.floor(value);
 			if (ref_sym) {
 				bs << " <";
 				if (ref_sym->name != nullptr)
 					bs << ref_sym->name;
 				else {
-					if ((ref_sym->address & Bean::TLS_ADDRESS_FLAG) != 0)
+					if (TLS::is_tls(ref_sym->address))
 						bs << "TLS:";
-					bs << "0x" << hex << (ref_sym->address & ~Bean::TLS_ADDRESS_FLAG);;
+					bs << "0x" << hex << TLS::virt_addr(ref_sym->address);
 				}
 
 				if (ref_sym->section.name != nullptr)
@@ -209,9 +229,9 @@ struct Bean {
 				id.dump(bs);
 				if (level == VERBOSE) {
 					bs << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
-					   << "0x" << setw(16) << setfill('0') << hex << (address & ~Bean::TLS_ADDRESS_FLAG)
+					   << "0x" << setw(16) << setfill('0') << hex << TLS::virt_addr(address)
 					   << dec << setw(7) << setfill(' ') << right << size << ' '
-					   << (section.writeable ? 'W' : ' ') << (section.executable ? 'X' : ' ') << ((address & Bean::TLS_ADDRESS_FLAG) != 0 ? 'T' : ' ');
+					   << (section.writeable ? 'W' : ' ') << (section.executable ? 'X' : ' ') << (TLS::is_tls(address) ? 'T' : ' ');
 					if (name != nullptr && name[0] != '\0')
 						bs << ' ' << name;
 					if (section.name != nullptr)
@@ -324,15 +344,15 @@ struct Bean {
 		static inline int compare(uintptr_t lhs, const Symbol & rhs) { return compare(lhs, rhs.address); }
 		static inline int compare(const Symbol & lhs, uintptr_t rhs) { return compare(lhs.address, rhs); }
 
-		static inline int compare(const Elf::Section & lhs, const Elf::Section & rhs) { return compare(lhs.virt_addr() | (lhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0), rhs.virt_addr() | (rhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0)); }
-		static inline int compare(const Symbol & lhs, const Elf::Section & rhs) { return compare(lhs.address, rhs.virt_addr() | (rhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0)); }
-		static inline int compare(const Elf::Section & lhs, const Symbol & rhs) { return compare(lhs.virt_addr() | (lhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0), rhs.address); }
-		static inline int compare(uintptr_t lhs, const Elf::Section & rhs) { return compare(lhs, rhs.virt_addr() | (rhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0)); }
-		static inline int compare(const Elf::Section & lhs, uintptr_t rhs) { return compare(lhs.virt_addr() | (lhs.tls() ? Bean::TLS_ADDRESS_FLAG : 0), rhs); }
+		static inline int compare(const Elf::Section & lhs, const Elf::Section & rhs) { return compare(TLS::trans_addr(lhs.virt_addr(), lhs.tls()), TLS::trans_addr(rhs.virt_addr(), rhs.tls())); }
+		static inline int compare(const Symbol & lhs, const Elf::Section & rhs) { return compare(lhs.address, TLS::trans_addr(rhs.virt_addr(), rhs.tls())); }
+		static inline int compare(const Elf::Section & lhs, const Symbol & rhs) { return compare(TLS::trans_addr(lhs.virt_addr(), lhs.tls()), rhs.address); }
+		static inline int compare(uintptr_t lhs, const Elf::Section & rhs) { return compare(lhs, TLS::trans_addr(rhs.virt_addr(), rhs.tls())); }
+		static inline int compare(const Elf::Section & lhs, uintptr_t rhs) { return compare(TLS::trans_addr(lhs.virt_addr(), lhs.tls()), rhs); }
 
 		static inline int compare(const Elf::Relocation & lhs, const Elf::Relocation & rhs) { return compare(lhs.offset(), rhs.offset()); }
-		static inline int compare(const Symbol & lhs, const Elf::Relocation & rhs) { return compare(lhs.address & ~Bean::TLS_ADDRESS_FLAG, rhs.offset()); }
-		static inline int compare(const Elf::Relocation & lhs, const Symbol & rhs) { return compare(lhs.offset(), rhs.address & ~Bean::TLS_ADDRESS_FLAG); }
+		static inline int compare(const Symbol & lhs, const Elf::Relocation & rhs) { return compare(TLS::virt_addr(lhs.address), rhs.offset()); }
+		static inline int compare(const Elf::Relocation & lhs, const Symbol & rhs) { return compare(lhs.offset(), TLS::virt_addr(rhs.address)); }
 		static inline int compare(uintptr_t lhs, const Elf::Relocation & rhs) { return compare(lhs, rhs.offset()); }
 		static inline int compare(const Elf::Relocation & lhs, uintptr_t rhs) { return compare(lhs.offset(), rhs); }
 
@@ -484,7 +504,7 @@ struct Bean {
 
 	static void insert_symbol(symtree_t & symbols, uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false) {
 		assert(!(executable && writeable));
-		assert(!(executable && (address & Bean::TLS_ADDRESS_FLAG)));
+		assert(!(executable && TLS::is_tls(address)));
 		auto pos = symbols.find(address);
 		if (!pos) {
 			symbols.emplace(address, size, name, section_name, writeable, executable);
@@ -570,15 +590,15 @@ struct Bean {
 								auto sym_sec = elf.sections[sym.section_index()];
 								if (sym.type() == Elf::STT_TLS) {
 									assert(sym_sec.tls());
-									insert_symbol(symbols, (tls_start + sym.value()) | TLS_ADDRESS_FLAG, sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
+									insert_symbol(symbols, TLS::trans_addr(tls_start + sym.value(), true), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
 								} else {
-									assert((sym.value() & TLS_ADDRESS_FLAG) == 0);
+									assert(!TLS::is_tls(sym.value()));  // check for address space conflicts
 									if (sym.type() != Elf::STT_NOTYPE) {
 										assert(sym.value() >= sym_sec.virt_addr());
 										assert(sym.value() + sym.size() <= sym_sec.virt_addr() + sym_sec.size());
 									}
 									if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
-										insert_symbol(symbols, sym.value() | (sym_sec.tls() ? TLS_ADDRESS_FLAG : 0), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
+										insert_symbol(symbols, TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
 								}
 							}
 						}
@@ -631,7 +651,7 @@ struct Bean {
 			// Add section start
 			uintptr_t address = section.virt_addr();
 			size_t size = section.size();
-			insert_symbol(symbols, address | (section.tls() ? TLS_ADDRESS_FLAG : 0), 0, nullptr, section.name(), section.writeable(), section.executable());
+			insert_symbol(symbols, TLS::trans_addr(address, section.tls()), 0, nullptr, section.name(), section.writeable(), section.executable());
 
 			// Find calls in exec
 			if (section.executable()) {
@@ -664,7 +684,7 @@ struct Bean {
 						case X86_INS_ENDBR64:
 							start = insn->address;
 							if (ret) {
-								insert_symbol(symbols, start | (section.tls() ? TLS_ADDRESS_FLAG : 0), 0, nullptr, section.name(), section.writeable(), section.executable());
+								insert_symbol(symbols, TLS::trans_addr(start, section.tls()), 0, nullptr, section.name(), section.writeable(), section.executable());
 								ret = false;
 							}
 							break;
@@ -692,7 +712,7 @@ struct Bean {
 									else {
 										auto sec = sections.floor(start);
 										assert(sec);
-										symbols.emplace(start, (address - start) | (sec->tls() ? TLS_ADDRESS_FLAG : 0), name, sec->name(), sec->writeable(), sec->executable());
+										symbols.emplace(start, TLS::trans_addr(address - start, sec->tls()), name, sec->name(), sec->writeable(), sec->executable());
 									}
 								}
 								break;
@@ -712,7 +732,7 @@ struct Bean {
 								// Only in executable sections
 								const auto section = sections.floor(target);
 								if (section && section->executable())
-									insert_symbol(symbols, target | (section->tls() ? TLS_ADDRESS_FLAG : 0), 0, nullptr, section->name(), section->writeable(), true);
+									insert_symbol(symbols, TLS::trans_addr(target, section->tls()), 0, nullptr, section->name(), section->writeable(), true);
 
 								break;
 							}
@@ -755,8 +775,8 @@ struct Bean {
 					debug_stream << "  \e[3m[the global offset table]\e[0m" << endl;
 
 				// 3a. calculate size (if 0), TODO: ignore nops!
-				const size_t max_addr = Math::min(last_addr, (section->virt_addr() + section->size()) | (section->tls() ? TLS_ADDRESS_FLAG : 0));
-				uintptr_t address = sym.address & ~TLS_ADDRESS_FLAG;
+				const size_t max_addr = Math::min(last_addr, TLS::trans_addr(section->virt_addr() + section->size(), section->tls()));
+				uintptr_t address = TLS::virt_addr(sym.address);
 				assert(max_addr >= sym.address);
 				const size_t max_size = max_addr - sym.address;
 				if (max_size > sym.size)
@@ -862,7 +882,7 @@ struct Bean {
 								case X86_OP_MEM:
 									// TODO: segment handling?
 									if (op.mem.segment == X86_REG_FS) {
-										const auto target = (tls_end + op.mem.disp) | TLS_ADDRESS_FLAG;
+										const auto target = TLS::trans_addr(tls_end + op.mem.disp, true);
 										sym.refs.insert(target);
 
 										op_debug[o].hashed = false;
