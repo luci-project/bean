@@ -2,7 +2,7 @@
 #include <dlh/stream/output.hpp>
 #include <dlh/string.hpp>
 
-#include "beanfile.hpp"
+#include <bean/file.hpp>
 
 TreeSet<const char *> ignore_writeable = { ".eh_frame_hdr", ".eh_frame", ".dynamic", ".data.rel.ro"};
 

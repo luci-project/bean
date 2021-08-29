@@ -1,5 +1,3 @@
 .build/
-diff
-hash
-update
-*.old
+example-*
+lib*.a

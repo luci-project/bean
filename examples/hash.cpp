@@ -1,17 +1,14 @@
 #include <dlh/stream/output.hpp>
 #include <dlh/string.hpp>
 
-#include "beanfile.hpp"
+#include <bean/file.hpp>
 
 int main(int argc, const char *argv[]) {
 	// Check arguments
 	if (argc < 2) {
-		cerr << "Usage: " << argv[0] << "[-r] [-v[v[v]]] ELF-FILES" << endl;
+		cerr << "Usage: " << argv[0] << " [-r] [-v[v[v]]] ELF-FILES" << endl;
 		return EXIT_FAILURE;
 	}
-
-	if (!BeanFile::init())
-		return EXIT_FAILURE;
 
 	Bean::Verbosity verbose = Bean::NONE;
 	bool reloc = false;

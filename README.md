@@ -12,16 +12,25 @@ Dependencies
  - [Capstone](http://www.capstone-engine.org/) is used to disassemble the binary sections
 
 
+Build
+-----
+
+Just run `make`. This will create two static libraries:
+
+ - `libbean.a` contains the binary analyzer
+ - `libbean-pack.a` also includes the Bean dependencies (Capstone and DLH)
+
+
 Examples
 --------
 
-The `src` directory contains a few example programs, which can be built using
+The `examples` directory contains a few example programs, which can be built using
 
-    make
+    make examples
 
 ### Hash
 
-Generate the hash values for the symbols in the given ELF files.
+Generate the hash values for the symbols in the given ELF files using `example-hash`
 Use the verbose parameter (`-v`, `-vv`, `-vvv`) for additional information about the generation of the hashes:
 
 Disassembled instructions are color-coded to highlight excluded parts for the
@@ -30,14 +39,14 @@ hashing. Moreover, all references and relocations are resolved.
 
 ### Diff
 
-Changed symbols of two given ELF files are highlighted in a diff typical manner.
+Changed symbols of two given ELF files are highlighted in a diff typical manner by `example-diff`.
 Increase the verbosity level for additional information about the changed
 symbols.
 
 
 ### Update
 
-Check if an ELF file can be live-updated by another ELF file.
+Check if an ELF file can be live-updated by another ELF file with `example-update`
 
 
 Name

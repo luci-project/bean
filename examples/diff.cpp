@@ -2,7 +2,7 @@
 #include <dlh/utils/string.hpp>
 #include <dlh/string.hpp>
 
-#include "beanfile.hpp"
+#include <bean/file.hpp>
 
 int main(int argc, const char *argv[]) {
 	Bean::Verbosity verbose = Bean::NONE;
@@ -13,9 +13,6 @@ int main(int argc, const char *argv[]) {
 	const char * new_path = nullptr;
 	BeanFile * a = nullptr;
 	BeanFile * b = nullptr;
-
-	if (!BeanFile::init())
-		return EXIT_FAILURE;
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-d")) {

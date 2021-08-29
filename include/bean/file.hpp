@@ -31,19 +31,6 @@ struct BeanFile {
 		::close(fd);
 	}
 
-	static inline bool init() {
-		// Capstone (used by Bean) without libc
-		cs_opt_mem setup = {
-			.malloc = malloc,
-			.calloc = calloc,
-			.realloc = realloc,
-			.free = free,
-			.vsnprintf = vsnprintf
-		};
-
-		return ::cs_option(0, CS_OPT_MEM, reinterpret_cast<size_t>(&setup)) == 0;
-	}
-
  private:
 	int open_file() const {
 		// Open file
