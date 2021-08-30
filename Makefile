@@ -24,10 +24,10 @@ BUILDFLAGS_capstone := CFLAGS="$(CFLAGS) -Iinclude -DCAPSTONE_X86_ATT_DISABLE -D
 LIBNAME = bean
 SOURCES = $(shell find $(SRCFOLDER)/ -name "*.cpp")
 OBJECTS = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.o))
-DEPFILES = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.d)) $(patsubst %.cpp,$(BUILDDIR)/%.d,$(wildcard example/*.cpp))
+EXAMPLES = $(patsubst $(EXAMPLEDIR)/%.cpp,example-%,$(wildcard $(EXAMPLEDIR)/*.cpp))
+DEPFILES = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.d)) $(patsubst $(EXAMPLEDIR)/%.cpp,$(BUILDDIR)/example-%.d,$(wildcard $(EXAMPLEDIR)/*.cpp))
 TARGET = lib$(LIBNAME).a
 COMBINED = lib$(LIBNAME)-pack.a
-EXAMPLES := $(patsubst $(EXAMPLEDIR)/%.cpp,example-%,$(wildcard $(EXAMPLEDIR)/*.cpp))
 
 LDFLAGS = -L. -l$(LIBNAME) $(foreach LIB,$(LIBS),-L $(LIB)/ -l$(LIB)) -Wl,--gc-sections
 EXTLIBS = $(foreach LIB,$(LIBS),$(LIB)/lib$(LIB).a)
@@ -36,24 +36,30 @@ EXTLIBS = $(foreach LIB,$(LIBS),$(LIB)/lib$(LIB).a)
 
 all: $(TARGET) $(COMBINED) $(EXAMPLES)
 
-$(BUILDDIR)/%.d: $(SRCFOLDER)/%.cpp $(BUILDDIR) $(MAKEFILE_LIST)
+$(BUILDDIR)/%.d: $(SRCFOLDER)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 	@echo "DEP		$<"
-	$(VERBOSE) $(CXX) $(CXXFLAGS) -MM -MP -MT $* -MF $@ $<
+	$(VERBOSE) $(CXX) $(CXXFLAGS) -MM -MP -MT $(BUILDDIR)/$*.o -MF $@ $<
 
-$(BUILDDIR)/%.o: $(SRCFOLDER)/%.cpp $(BUILDDIR) $(EXTLIBS) $(MAKEFILE_LIST)
+$(BUILDDIR)/example-%.d: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
+	@echo "DEP		$<"
+	$(VERBOSE) $(CXX) $(CXXFLAGS) -MM -MP -MT example-$* -MF $@ $<
+
+$(BUILDDIR)/%.o: $(SRCFOLDER)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 	@echo "CXX		$<"
 	@mkdir -p $(@D)
 	$(VERBOSE) $(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(TARGET): $(OBJECTS) $(MAKEFILE_LIST)
 	@echo "AR		$@"
+	@rm -f $@
 	$(VERBOSE) $(AR) rcs $@ $^
 
-$(COMBINED): $(TARGET) $(EXTLIBS)
+$(COMBINED): $(TARGET) $(EXTLIBS) | $(MAKEFILE_LIST)
 	@echo "AR		$@"
+	@rm -f $@
 	$(VERBOSE) echo 'create $@\n$(foreach FILE,$^,addlib $(FILE)\n)save\nend\n' | ar -M
 
-example-%: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) $(TARGET) $(EXTLIBS) | $(BUILDDIR)
+example-%: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) $(TARGET) $(EXTLIBS) |
 	@echo "CXX		$@"
 	$(VERBOSE) $(CXX) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
 
