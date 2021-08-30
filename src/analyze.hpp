@@ -172,18 +172,7 @@ class Analyze {
 						}
 					}
 					break;
-	/*
-				case ELF<C>::SHT_DYNAMIC:
-					for (const auto & dyn: section.get_dynamic())
-						switch(dyn.tag()) {
-							case ELF<C>::DT_PLTGOT:
-								global_offset_table = dyn.value();
-								break;
 
-							// TODO: Other entries can be used to insert symbol borders
-						}
-					break;
-	*/
 				default:
 					continue;
 			}
@@ -212,10 +201,18 @@ class Analyze {
 				XXHash64 id_external(0);  // TODO seed
 				// Relocations
 				for (const auto rel : sym.rels) {
-					id_external.add<uintptr_t>(rel.offset);
+					assert(rel.offset >= Bean::TLS::virt_addr(sym.address));
+					id_external.add<uintptr_t>(rel.offset - Bean::TLS::virt_addr(sym.address));
 					id_external.add<uintptr_t>(rel.type);
-					id_external.add(rel.name, strlen(rel.name));
-					id_external.add<uintptr_t>(rel.addend);
+					if (rel.target == 0) {
+						// Unresolved target: add full relocation info
+						if (rel.name != nullptr && rel.name[0] != '\0')
+							id_external.add(rel.name, strlen(rel.name));
+						id_external.add<uintptr_t>(rel.addend);
+					} else {
+						// Resolved target: Just add as reference
+						sym.refs.insert(rel.target);
+					}
 				}
 				// References
 				for (const auto ref : sym.refs) {

@@ -128,8 +128,14 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 						bs << rel.name;
 						if (rel.addend != 0)
 							bs << " + " << dec << rel.addend;
-					} else {
+					} else if (rel.target == 0) {
 						bs << "0x" << hex << rel.addend;
+					} else {
+						auto ref_sym = Bean::dump_address(cout, rel.target, *symbols);
+						if (ref_sym->id.valid()) {
+							bs << ' ';
+							ref_sym->id.dump(bs);
+						}
 					}
 					if (!rel.undefined)
 						bs << "\e[23m";

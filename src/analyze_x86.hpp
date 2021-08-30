@@ -292,7 +292,7 @@ class AnalyzeX86 : public Analyze<C> {
 		for (size_t a = Math::align_down(address, bytes_per_line); a < Math::align_up(address + sym.size, bytes_per_line); a++) {
 			if (a % bytes_per_line == 0)
 				this->debug_stream << setfill(' ') << setw(16) << prefix << right << hex << a << ' '
-				                   << (a < rel_end ? "\e[33;4m" : "\e[33m") << setfill('0') << noprefix;
+				                   << (a < rel_end ? "\e[35;4m" : "\e[33m") << setfill('0') << noprefix;
 			if (a < address || a >= address + sym.size) {
 				if (rel && a == rel_end)
 					this->debug_stream << "\e[0m";
@@ -307,7 +307,7 @@ class AnalyzeX86 : public Analyze<C> {
 					this->debug_stream << ' ';
 				}
 				if (rel && a == rel->offset) {
-					this->debug_stream << "\e[33;4m";
+					this->debug_stream << "\e[35;4m";
 					had_rel = true;
 					rel_end = rel->offset + Relocator<typename ELF<C>::Relocation>::size(rel->type, this->elf.header.machine());
 				}
@@ -566,8 +566,29 @@ class AnalyzeX86 : public Analyze<C> {
 				if (is_bss) {
 					id_internal.addZeros(sym.size);
 				} else {
-					// TODO: Do not hash relocation targets
-					id_internal.add(data, sym.size);
+					// Do not hash content of relocation targets
+					auto start = address;
+					auto end = address + sym.size;
+					// Check all relocations
+					for (const auto &rel : sym.rels) {
+						// Get relocation length
+						auto len = Relocator<typename ELF<C>::Relocation>::size(rel.type, this->elf.header.machine());
+						if (len == 0)
+							continue;
+
+						// Hash content before relocation
+						if (start < rel.offset)
+							id_internal.add(data + (start - address), rel.offset - start);
+
+						// Hash zeros for relocation
+						id_internal.addZeros(len);
+
+						start = rel.offset + len;
+						assert(start <= end);
+					}
+					// Add end
+					if (start < end)
+						id_internal.add(data + (start - address), end - start);
 				}
 
 				if (this->debug && sym.size > 0)

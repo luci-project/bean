@@ -52,5 +52,5 @@ Check if an ELF file can be live-updated by another ELF file with `example-updat
 Name
 ----
 
-Its name origins from the [Disenchantment](https://en.wikipedia.org/wiki/Disenchantment_(TV_series)) [character](https://disenchantment.fandom.com/wiki/Elfo), obviously.
+Its name origins from the [Disenchantment](https://en.wikipedia.org/wiki/Disenchantment_(TV_series)) [character](https://disenchantment.fandom.com/wiki/Bean), obviously.
 Thanks for all the fun, [Matt](https://en.wikipedia.org/wiki/Matt_Groening)!

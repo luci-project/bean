@@ -63,18 +63,32 @@ struct Bean {
 	};
 
 	struct SymbolRelocation {
+		/*! \brief Offset in virtual memory for the relocation */
 		uintptr_t offset;
+
+		/*! \brief Relocation type (architecture dependend value) */
 		uintptr_t type;
+
+		/*! \brief Symbolic name (if available) */
 		const char * name;
+
+		/*! \brief Addend for reloaction */
 		uintptr_t addend;
+
+		/*! \brief Resolved target address */
 		uintptr_t target;
+
+		/*! \brief is the target symbol undefined (= extern) */
 		bool undefined;
 
+		/*! \brief Constructor using plain values */
 		SymbolRelocation(uintptr_t offset, uintptr_t type, const char * name = nullptr, uintptr_t addend = 0, bool undefined = false, uintptr_t target = 0)
 		  : offset(offset), type(type), name(name), addend(addend), target(target), undefined(undefined) {}
 
-		// Explicit instantiation
+		/*! \brief Constructor using relocation pointer */
 		SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Relocation & relocation, bool resolve_target = false, uintptr_t global_offset_table = 0);
+
+		/*! \brief Constructor using relocation pointer */
 		SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Relocation & relocation, bool resolve_target = false, uintptr_t global_offset_table = 0);
 	};
 

@@ -58,9 +58,18 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 		undefined = (rel_sym.section_index() == ELF<ELF_Def::Identification::ELFCLASS32>::SHN_UNDEF);
 	}
 
-	// Perform relocation
-	if (resolve_target && !undefined)
-		target = Relocator(relocation, global_offset_table).value(0);
+	if (!undefined)
+		switch (relocation.type()) {
+			case ELF<ELF_Def::Identification::ELFCLASS32>::R_X86_64_RELATIVE:
+			case ELF<ELF_Def::Identification::ELFCLASS32>::R_X86_64_RELATIVE64:
+				target = addend;
+				break;
+
+			default:
+				// Perform relocation
+				if (resolve_target)
+					target = Relocator(relocation, global_offset_table).value(0);
+		}
 }
 
 Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Relocation & relocation, bool resolve_target, uintptr_t global_offset_table)
@@ -75,8 +84,18 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 	}
 
 	// Perform relocation
-	if (resolve_target && !undefined)
-		target = Relocator(relocation, global_offset_table).value(0);
+	if (!undefined)
+		switch (relocation.type()) {
+			case ELF<ELF_Def::Identification::ELFCLASS64>::R_X86_64_RELATIVE:
+			case ELF<ELF_Def::Identification::ELFCLASS64>::R_X86_64_RELATIVE64:
+				target = addend;
+				break;
+
+			default:
+				// Perform relocation
+				if (resolve_target)
+					target = Relocator(relocation, global_offset_table).value(0);
+		}
 }
 
 
