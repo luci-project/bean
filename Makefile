@@ -2,35 +2,43 @@ VERBOSE = @
 
 SRCFOLDER = src
 EXAMPLEDIR = examples
-BUILDDIR ?= .build
+LIBNAME = bean
 LIBS := capstone dlh
 
 AR ?= ar
 CXX ?= g++
 
-CFLAGS ?= -Og -g
+ifeq ($(DIET), 1)
+	CFLAGS ?= -O3
+	BUILDDIR ?= .build-diet
+	LIBDIR ?= libs-diet
+	BUILDFLAGS_capstone ?= CAPSTONE_DIET=yes CAPSTONE_X86_ATT_DISABLE=yes CAPSTONE_ARCHS="x86" CAPSTONE_USE_SYS_DYN_MEM=no CAPSTONE_STATIC=yes CAPSTONE_SHARED=no
+else
+	CFLAGS ?= -Og -g -DBEAN_VERBOSE
+	BUILDDIR ?= .build
+	LIBDIR ?= libs
+	BUILDFLAGS_capstone ?= CAPSTONE_X86_ATT_DISABLE=yes CAPSTONE_ARCHS="x86" CAPSTONE_USE_SYS_DYN_MEM=no CAPSTONE_STATIC=yes CAPSTONE_SHARED=no
+endif
+
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-builtin -fno-exceptions -fno-stack-protector -fno-pic -mno-red-zone
 
-CXXFLAGS ?= -std=c++17 $(CFLAGS)
+CXXFLAGS ?= -std=c++17 $(CFLAGS) -Wall -Wextra -Wno-switch -Wno-unused-variable -Wno-comment
 CXXFLAGS += -I include -I bean/include/ -I elfo/include/ $(foreach LIB,$(LIBS),-I $(LIB)/include)
 CXXFLAGS += -I dlh/legacy -DUSE_DLH
 CXXFLAGS += -fno-rtti -fno-use-cxa-atexit -no-pie
 CXXFLAGS += -nostdlib -nostdinc
-CXXFLAGS += -Wall -Wextra -Wno-switch -Wno-unused-variable -Wno-comment
 
-BUILDFLAGS_capstone := CFLAGS="$(CFLAGS) -Iinclude -DCAPSTONE_X86_ATT_DISABLE -DCAPSTONE_HAS_X86" CAPSTONE_X86_ATT_DISABLE=yes CAPSTONE_ARCHS="x86" CAPSTONE_USE_SYS_DYN_MEM=no CAPSTONE_STATIC=yes CAPSTONE_SHARED=no
+BUILDFLAGS_dlh ?= CXXFLAGS="$(CXXFLAGS)"
 
-LIBNAME = bean
 SOURCES = $(shell find $(SRCFOLDER)/ -name "*.cpp")
 OBJECTS = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.o))
 EXAMPLES = $(patsubst $(EXAMPLEDIR)/%.cpp,example-%,$(wildcard $(EXAMPLEDIR)/*.cpp))
 DEPFILES = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.d)) $(patsubst $(EXAMPLEDIR)/%.cpp,$(BUILDDIR)/example-%.d,$(wildcard $(EXAMPLEDIR)/*.cpp))
 TARGET = lib$(LIBNAME).a
-COMBINED = lib$(LIBNAME)-pack.a
 
-LDFLAGS = -L. -l$(LIBNAME) $(foreach LIB,$(LIBS),-L $(LIB)/ -l$(LIB)) -Wl,--gc-sections
-EXTLIBS = $(foreach LIB,$(LIBS),$(LIB)/lib$(LIB).a)
+LDFLAGS = -L$(LIBDIR) -l$(LIBNAME) $(foreach LIB,$(LIBS),-l$(LIB)) -Wl,--gc-sections
+EXTLIBS = $(foreach LIB,$(LIBS),$(LIBDIR)/lib$(LIB).a)
 
 
 
@@ -49,13 +57,14 @@ $(BUILDDIR)/%.o: $(SRCFOLDER)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 	@mkdir -p $(@D)
 	$(VERBOSE) $(CXX) $(CXXFLAGS) -c -o $@ $<
 
-$(TARGET): $(OBJECTS) $(MAKEFILE_LIST)
+$(LIBDIR)/$(TARGET): $(OBJECTS) $(MAKEFILE_LIST)
 	@echo "AR		$@"
+	@mkdir -p $(@D)
 	@rm -f $@
 	$(VERBOSE) $(AR) rcs $@ $^
 
-$(COMBINED): $(TARGET) $(EXTLIBS) | $(MAKEFILE_LIST)
-	@echo "AR		$@"
+$(TARGET): $(LIBDIR)/$(TARGET) $(EXTLIBS) | $(MAKEFILE_LIST)
+	@echo "PKG		$@"
 	@rm -f $@
 	$(VERBOSE) echo 'create $@\n$(foreach FILE,$^,addlib $(FILE)\n)save\nend\n' | ar -M
 
@@ -70,7 +79,12 @@ define LIB_template =
 $(1)/lib$(1).a:
 	@echo "BUILD		$$@"
 	@test -d $1 || git submodule update --init
-	$$(VERBOSE) $$(MAKE) $$(BUILDFLAGS_$(1)) -j4 -C $1 $$(notdir $$@)
+	$$(VERBOSE) $$(MAKE) $$(BUILDFLAGS_$(1)) -j4 -C $(1) $$(notdir $$@)
+
+$$(LIBDIR)/lib$(1).a: $(1)/lib$(1).a
+	@echo "CPY		$$@"
+	@mkdir -p $$(@D)
+	$$(VERBOSE) cp $$< $$@
 
 clean::
 	@test -d $1 && $$(MAKE) -C $1 $$@

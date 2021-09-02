@@ -32,6 +32,7 @@ class AnalyzeX86 : public Analyze<C> {
 					// fall through
 					__attribute__((__fallthrough__));
 				}
+#ifdef BEAN_VERBOSE
 				default:
 					if (this->debug) {
 						// Verify only writeable data sections are relocated
@@ -42,6 +43,7 @@ class AnalyzeX86 : public Analyze<C> {
 						assert(!sec->executable());
 						assert(sec->type() != ELF<C>::SHT_NOBITS);
 					}
+#endif
 			}
 	}
 
@@ -62,10 +64,10 @@ class AnalyzeX86 : public Analyze<C> {
 			// Find calls in exec
 			if (section.executable()) {
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
-
+#ifdef BEAN_VERBOSE
 				// For better readability, name the PLT functions
 				bool plt_name = this->debug && strncmp(section.name(), ".plt.", 5) == 0;
-
+#endif
 				// start of current function
 				uintptr_t start = address;
 
@@ -102,6 +104,7 @@ class AnalyzeX86 : public Analyze<C> {
 
 					for (size_t g = 0; g < insn->detail->groups_count; g++) {
 						switch (insn->detail->groups[g]) {
+#ifdef BEAN_VERBOSE
 							case CS_GRP_JUMP:
 								if (plt_name) {
 									assert(insn->detail->x86.op_count == 1);
@@ -122,7 +125,7 @@ class AnalyzeX86 : public Analyze<C> {
 									}
 								}
 								break;
-
+#endif
 							case CS_GRP_CALL:
 							{
 								auto & detail_x86 = insn->detail->x86;
@@ -191,6 +194,7 @@ class AnalyzeX86 : public Analyze<C> {
 		}
 	}
 
+#ifdef BEAN_VERBOSE
 	/*! \brief Helper to identify used operands in `hash_internal` debug output */
 	struct HashInternalOpDebug {
 		bool hashed = true;
@@ -368,6 +372,7 @@ class AnalyzeX86 : public Analyze<C> {
 		// Clear for next symbol
 		this->debug_stream.clear();
 	}
+#endif
 
  public:
 	/*! \brief Create internal identifier
@@ -389,11 +394,11 @@ class AnalyzeX86 : public Analyze<C> {
 				sym.section.executable = section->executable();
 				sym.section.writeable = section->writeable();
 			}
-
+#ifdef BEAN_VERBOSE
 			// Mark GOT in debug
 			if (this->debug && sym.address == this->global_offset_table)
 				this->debug_stream << "  \e[3m[the global offset table]\e[0m" << endl;
-
+#endif
 			// 3a. calculate size (if 0), TODO: ignore nops!
 			const size_t max_addr = Math::min(last_addr, Bean::TLS::trans_addr(section->virt_addr() + section->size(), section->tls()));
 			uintptr_t address = Bean::TLS::virt_addr(sym.address);
@@ -466,11 +471,11 @@ class AnalyzeX86 : public Analyze<C> {
 							break;
 						else
 							opcode_size += hashbuf.push(detail_x86.opcode[o]);
-
+#ifdef BEAN_VERBOSE
 					// Helper for debug
 					int debug_ignore = 255;
 					HashInternalOpDebug op_debug[detail_x86.op_count];
-
+#endif
 					// Handle operands
 					for (int o = 0; o < detail_x86.op_count; o++) {
 						auto & op = detail_x86.operands[o];
@@ -484,8 +489,9 @@ class AnalyzeX86 : public Analyze<C> {
 							{
 								const auto target = static_cast<uintptr_t>(op.imm);
 								if (is_branch_instruction(insn->id)) {
+#ifdef BEAN_VERBOSE
 									op_debug[o].value = target;
-
+#endif
 									// Inside symbol?
 									if (target >= sym.address && target < sym.address + sym.size) {
 										max_branch = target;
@@ -494,7 +500,9 @@ class AnalyzeX86 : public Analyze<C> {
 									} else {
 										// other symbol, add reference
 										sym.refs.insert(target);
+#ifdef BEAN_VERBOSE
 										op_debug[o].hashed = false;
+#endif
 									}
 								} else {
 									hashbuf.push(target);
@@ -507,17 +515,19 @@ class AnalyzeX86 : public Analyze<C> {
 								if (op.mem.segment == X86_REG_FS) {
 									const auto target = Bean::TLS::trans_addr(this->tls_end + op.mem.disp, true);
 									sym.refs.insert(target);
-
+#ifdef BEAN_VERBOSE
 									op_debug[o].hashed = false;
 									op_debug[o].value = static_cast<uintptr_t>(target);
+#endif
 								}
 								// RIP relative memory access
 								if (op.mem.base == X86_REG_RIP) {
 									const auto target = insn->address + insn->size + op.mem.disp;
 									sym.refs.insert(target);
-
+#ifdef BEAN_VERBOSE
 									op_debug[o].hashed = false;
 									op_debug[o].value = static_cast<uintptr_t>(target);
+#endif
 								} else {
 									hashbuf.push(op.mem);
 								}
@@ -526,17 +536,18 @@ class AnalyzeX86 : public Analyze<C> {
 							default:
 								break;
 						}
-
+#ifdef BEAN_VERBOSE
 						if (debug_ignore > o && !op_debug[o].hashed) {
 							debug_ignore = o;
 							if (o == 0 && detail_x86.modrm != 0)
 								debug_ignore++;
 						}
+#endif
 					}
-
+#ifdef BEAN_VERBOSE
 					if (this->debug)
 						hash_internal_debug_executable(prefix_size, opcode_size, debug_ignore, op_debug);
-
+#endif
 					// add instruction hash buffer to hash
 					id_internal.add(hashbuf.buffer(), hashbuf.size());
 				}
@@ -590,16 +601,16 @@ class AnalyzeX86 : public Analyze<C> {
 					if (start < end)
 						id_internal.add(data + (start - address), end - start);
 				}
-
+#ifdef BEAN_VERBOSE
 				if (this->debug && sym.size > 0)
 					hash_internal_debug_data(sym, data, is_bss);
-
+#endif
 			}
-
+#ifdef BEAN_VERBOSE
 			// Allocate debug buffer
 			if (this->debug)
 				hash_internal_debug_strdup(sym);
-
+#endif
 			// Calculate has
 			sym.id.internal = id_internal.hash();
 

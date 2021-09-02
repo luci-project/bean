@@ -8,9 +8,20 @@
 
 template<ELFCLASS C>
 class Analyze {
+#ifdef BEAN_VERBOSE
 	/*! \brief Pointer to buffer for debug stream */
 	char * const debug_buffer = nullptr;
 
+ protected:
+	/*! \brief Create detailed debug information for every symbol
+	 * \note Allocated memory will never be freed!
+	 */
+	const bool debug;
+
+	/*! \brief Debug string buffer */
+	BufferStream debug_stream;
+
+#endif
  protected:
 	/*! \brief Container for all detected symbols */
 	Bean::symtree_t &symbols;
@@ -22,14 +33,6 @@ class Analyze {
 	 * \note security risk with irelative!
 	 */
 	const bool resolve_internal_relocations;
-
-	/*! \brief Create detailed debug information for every symbol
-	 * \note Allocated memory will never be freed!
-	 */
-	const bool debug;
-
-	/*! \brief Debug string buffer */
-	BufferStream debug_stream;
 
 	/*! \brief Temporary container for relevant sections of elf file*/
 	TreeSet<typename ELF<C>::Section, Bean::SymbolAddressComparison> sections;
@@ -50,17 +53,26 @@ class Analyze {
 	uintptr_t tls_end = 0;
 
 	/*! \brief Constructor */
-	Analyze(Bean::symtree_t & symbols, const ELF<C> &elf, bool resolve_internal_relocations, bool debug, size_t buffer_size)
-	 : debug_buffer(debug ? reinterpret_cast<char*>(malloc(buffer_size)) : nullptr), symbols(symbols), elf(elf),
-	   resolve_internal_relocations(resolve_internal_relocations), debug(debug), debug_stream(debug_buffer, buffer_size) {
+	Analyze(Bean::symtree_t & symbols, const ELF<C> &elf, bool resolve_internal_relocations, bool debug, size_t buffer_size) :
+#ifdef BEAN_VERBOSE
+	  debug_buffer(debug ? reinterpret_cast<char*>(malloc(buffer_size)) : nullptr), debug(debug), debug_stream(debug_buffer, buffer_size),
+#endif
+	  symbols(symbols), elf(elf), resolve_internal_relocations(resolve_internal_relocations) {
+#ifdef BEAN_VERBOSE
 		if (debug)
 			assert(debug_buffer != nullptr);
+#else
+		(void) buffer_size;
+		assert(!debug && "debug data not available in DIET mode");
+#endif
 	}
 
 	/*! \brief Destructor */
-	virtual ~Analyze(){
+	virtual ~Analyze() {
+#ifdef BEAN_VERBOSE
 		// Free debug buffer (if allocated)
 		free(debug_buffer);
+#endif
 	}
 
 	/*! \brief Insert (or, if address range is already in use, merge) symbol */

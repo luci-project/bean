@@ -76,7 +76,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 		bs << endl;
 	} else {
 		dump_name(bs);
-
+#ifdef BEAN_VERBOSE
 		if (debug != nullptr || refs.size() > 0 || rels.size() > 0 || deps.size() > 0)
 			bs << ':';
 		bs << endl;
@@ -92,7 +92,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 				}
 			} while (debug[i] != '\0');
 		}
-
+#endif
 		if (refs.size() > 0) {
 			bs << prefix << "  " << dec << refs.size() << " Reference";
 			if (refs.size() != 1)
