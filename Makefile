@@ -25,8 +25,8 @@ CFLAGS += -fno-builtin -fno-exceptions -fno-stack-protector -fno-pic -mno-red-zo
 
 CXXFLAGS ?= -std=c++17 $(CFLAGS) -Wall -Wextra -Wno-switch -Wno-unused-variable -Wno-comment
 CXXFLAGS += -I include -I bean/include/ -I elfo/include/ $(foreach LIB,$(LIBS),-I $(LIB)/include)
-CXXFLAGS += -I dlh/legacy -DUSE_DLH
-CXXFLAGS += -fno-rtti -fno-use-cxa-atexit -no-pie
+CXXFLAGS += -I dlh/legacy -DVIRTUAL -DUSE_DLH
+CXXFLAGS += -fno-rtti -fno-use-cxa-atexit -fPIE
 CXXFLAGS += -nostdlib -nostdinc
 
 BUILDFLAGS_dlh ?= CXXFLAGS="$(CXXFLAGS)"
@@ -55,7 +55,7 @@ $(BUILDDIR)/example-%.d: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 $(BUILDDIR)/%.o: $(SRCFOLDER)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 	@echo "CXX		$<"
 	@mkdir -p $(@D)
-	$(VERBOSE) $(CXX) $(CXXFLAGS) -c -o $@ $<
+	$(VERBOSE) $(CXX) $(CXXFLAGS) -D__MODULE__="Bean" -c -o $@ $<
 
 $(LIBDIR)/$(TARGET): $(OBJECTS) $(MAKEFILE_LIST)
 	@echo "AR		$@"
