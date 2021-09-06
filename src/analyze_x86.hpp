@@ -24,9 +24,11 @@ class AnalyzeX86 : public Analyze<C> {
 			switch (rel.type()) {
 				case ELF<C>::R_X86_64_RELATIVE:
 				case ELF<C>::R_X86_64_RELATIVE64:
+				case ELF<C>::R_X86_64_IRELATIVE:
 				{
 					auto sec = this->sections.floor(static_cast<uintptr_t>(rel.addend()));
 					assert(sec);
+					assert(rel.type() != ELF<C>::R_X86_64_IRELATIVE || sec->executable());
 					assert(!sec->tls());
 					this->insert_symbol(rel.addend(), 0, nullptr, sec->name(), sec->writeable(), sec->executable());
 					// fall through
@@ -112,16 +114,18 @@ class AnalyzeX86 : public Analyze<C> {
 									assert(op.type == X86_OP_MEM && op.mem.base == X86_REG_RIP);
 
 									const auto relocation = this->relocations.find(insn->address + insn->size + op.mem.disp);
-									assert(relocation && relocation->symbol_index() != 0);
-									auto name = relocation->symbol().name();
+									assert(relocation);
+									if (relocation->symbol_index() != 0) {
+										auto name = relocation->symbol().name();
 
-									auto pos = this->symbols.find(start);
-									if (pos)
-										pos->name = name;
-									else {
-										auto sec = this->sections.floor(start);
-										assert(sec);
-										this->symbols.emplace(start, Bean::TLS::trans_addr(address - start, sec->tls()), name, sec->name(), sec->writeable(), sec->executable());
+										auto pos = this->symbols.find(start);
+										if (pos)
+											pos->name = name;
+										else {
+											auto sec = this->sections.floor(start);
+											assert(sec);
+											this->symbols.emplace(start, Bean::TLS::trans_addr(address - start, sec->tls()), name, sec->name(), sec->writeable(), sec->executable());
+										}
 									}
 								}
 								break;
