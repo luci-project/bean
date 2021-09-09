@@ -68,7 +68,7 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 			default:
 				// Perform relocation
 				if (resolve_target)
-					target = Relocator(relocation, global_offset_table).value_internal(0);
+					target = Relocator(relocation, global_offset_table).value(0);
 		}
 }
 
@@ -94,7 +94,7 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 			default:
 				// Perform relocation
 				if (resolve_target)
-					target = Relocator(relocation, global_offset_table).value_internal(0);
+					target = Relocator(relocation, global_offset_table).value(0);
 		}
 }
 
