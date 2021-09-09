@@ -31,8 +31,9 @@ CXXFLAGS += -nostdlib -nostdinc
 
 BUILDFLAGS_dlh ?= CXXFLAGS="$(CXXFLAGS)"
 
+BUILDINFO = $(BUILDDIR)/.build_$(LIBNAME).o
 SOURCES = $(shell find $(SRCFOLDER)/ -name "*.cpp")
-OBJECTS = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.o))
+OBJECTS = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.o)) $(BUILDINFO)
 EXAMPLES = $(patsubst $(EXAMPLEDIR)/%.cpp,example-%,$(wildcard $(EXAMPLEDIR)/*.cpp))
 DEPFILES = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.d)) $(patsubst $(EXAMPLEDIR)/%.cpp,$(BUILDDIR)/example-%.d,$(wildcard $(EXAMPLEDIR)/*.cpp))
 TARGET = lib$(LIBNAME).a
@@ -55,18 +56,27 @@ $(BUILDDIR)/example-%.d: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 $(BUILDDIR)/%.o: $(SRCFOLDER)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 	@echo "CXX		$<"
 	@mkdir -p $(@D)
-	$(VERBOSE) $(CXX) $(CXXFLAGS) -D__MODULE__="Bean" -c -o $@ $<
+	$(VERBOSE) $(CXX) $(CXXFLAGS) -D__MODULE__="$(LIBNAME)" -c -o $@ $<
+
+$(BUILDINFO): FORCE
+	@echo "CXX		$@"
+	@echo 'const char * build_elfo_version() { return "$(shell cd elfo ; git describe --dirty --always --tags)"; } ' \
+	'const char * build_capstone_version() { return "$(shell cd capstone ; git describe --dirty --always --tags)"; } ' \
+	'const char * build_capstone_flags() { return "$(subst ",',$(BUILDFLAGS_capstone))"; } ' \
+	'const char * build_$(LIBNAME)_version() { return "$(shell git describe --dirty --always --tags)"; } ' \
+	'const char * build_$(LIBNAME)_date() { return "$(shell date -R)"; }' \
+	'const char * build_$(LIBNAME)_flags() { return "$(CXXFLAGS)"; }' | $(CXX) $(CXXFLAGS) -x c++ -c -o $@ -
 
 $(LIBDIR)/$(TARGET): $(OBJECTS) $(MAKEFILE_LIST)
 	@echo "AR		$@"
 	@mkdir -p $(@D)
 	@rm -f $@
-	$(VERBOSE) $(AR) rcs $@ $^
+	$(VERBOSE) $(AR) rcs $@ $(OBJECTS)
 
 $(TARGET): $(LIBDIR)/$(TARGET) $(EXTLIBS) | $(MAKEFILE_LIST)
 	@echo "PKG		$@"
 	@rm -f $@
-	$(VERBOSE) echo 'create $@\n$(foreach FILE,$^,addlib $(FILE)\n)save\nend\n' | ar -M
+	$(VERBOSE) echo 'create $@\n$(foreach FILE,$(LIBDIR)/$(TARGET) $(EXTLIBS),addlib $(FILE)\n)save\nend\n' | ar -M
 
 example-%: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) $(TARGET) $(EXTLIBS) |
 	@echo "CXX		$@"
@@ -110,5 +120,7 @@ $(DEPFILES):
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPFILES)
 endif
+
+FORCE:
 
 .PHONY: all examples clean mrproper
