@@ -1,26 +1,8 @@
 #include <bean/bean.hpp>
 
-#include <capstone/capstone.h>
-
 #include "analyze.hpp"
 #include "analyze_x86.hpp"
-
-static bool capstone_init() {
-	static bool initialized = false;
-	if (!initialized) {
-		// Capstone (used by Bean) without libc
-		cs_opt_mem setup = {
-			.malloc = malloc,
-			.calloc = calloc,
-			.realloc = realloc,
-			.free = free,
-			.vsnprintf = vsnprintf
-		};
-
-		initialized = ::cs_option(0, CS_OPT_MEM, reinterpret_cast<size_t>(&setup)) == 0;
-	}
-	return initialized;
-}
+#include "capstone.hpp"
 
 
 template<ELFCLASS C>

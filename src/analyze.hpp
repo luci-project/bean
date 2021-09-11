@@ -1,10 +1,6 @@
 #pragma once
 
-#include <dlh/utils/xxhash.hpp>
-#include <dlh/utils/math.hpp>
-
 #include <bean/bean.hpp>
-#include <elfo/elf.hpp>
 
 template<ELFCLASS C>
 class Analyze {
@@ -55,7 +51,7 @@ class Analyze {
 	/*! \brief Constructor */
 	Analyze(Bean::symtree_t & symbols, const ELF<C> &elf, bool resolve_internal_relocations, bool debug, size_t buffer_size) :
 #ifdef BEAN_VERBOSE
-	  debug_buffer(debug ? reinterpret_cast<char*>(malloc(buffer_size)) : nullptr), debug(debug), debug_stream(debug_buffer, buffer_size),
+	  debug_buffer(debug ? Memory::alloc<char>(buffer_size) : nullptr), debug(debug), debug_stream(debug_buffer, buffer_size),
 #endif
 	  symbols(symbols), elf(elf), resolve_internal_relocations(resolve_internal_relocations) {
 #ifdef BEAN_VERBOSE
@@ -71,7 +67,7 @@ class Analyze {
 	virtual ~Analyze() {
 #ifdef BEAN_VERBOSE
 		// Free debug buffer (if allocated)
-		free(debug_buffer);
+		Memory::free(debug_buffer);
 #endif
 	}
 
@@ -219,7 +215,7 @@ class Analyze {
 					if (rel.target == 0) {
 						// Unresolved target: add full relocation info
 						if (rel.name != nullptr && rel.name[0] != '\0')
-							id_external.add(rel.name, strlen(rel.name));
+							id_external.add(rel.name, String::len(rel.name));
 						id_external.add<uintptr_t>(rel.addend);
 					} else {
 						// Resolved target: Just add as reference

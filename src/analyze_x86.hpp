@@ -1,10 +1,10 @@
 #pragma once
 
-#include <dlh/utils/bytebuffer.hpp>
-#include <dlh/utils/iterator.hpp>
-#include <dlh/utils/string.hpp>
-#include <dlh/utils/xxhash.hpp>
-#include <dlh/utils/math.hpp>
+#include <dlh/bytebuffer.hpp>
+#include <dlh/iterator.hpp>
+#include <dlh/string.hpp>
+#include <dlh/xxhash.hpp>
+#include <dlh/math.hpp>
 
 #include <capstone/capstone.h>
 #include <elfo/elf.hpp>
@@ -68,7 +68,7 @@ class AnalyzeX86 : public Analyze<C> {
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
 #ifdef BEAN_VERBOSE
 				// For better readability, name the PLT functions
-				bool plt_name = this->debug && strncmp(section.name(), ".plt.", 5) == 0;
+				bool plt_name = this->debug && String::compare(section.name(), ".plt.", 5) == 0;
 #endif
 				// start of current function
 				uintptr_t start = address;
@@ -367,7 +367,7 @@ class AnalyzeX86 : public Analyze<C> {
 		size_t len = 0;
 		const char * buf = this->debug_stream.str(len);
 		if (buf != nullptr && len > 0) {
-			char * tmp = reinterpret_cast<char*>(malloc(len + 1));
+			char * tmp = Memory::alloc<char>(len + 1);
 			assert(tmp != nullptr);
 			memcpy(tmp, buf, len);
 			tmp[len] = '\0';

@@ -15,9 +15,9 @@ int main(int argc, const char *argv[]) {
 	bool explain = false;
 
 	for (int i = 1; i < argc; i++) {
-		if (strcmp(argv[i], "-r") == 0) {
+		if (String::compare(argv[i], "-r") == 0) {
 			reloc = true;
-		} else if (strncmp(argv[i], "-v", 2) == 0) {
+		} else if (String::compare(argv[i], "-v", 2) == 0) {
 			for (size_t j = 1; argv[i][j] != '\0'; j++) {
 				if (argv[i][j] == 'v') {
 					verbose = static_cast<Bean::Verbosity>(1 + static_cast<uint8_t>(verbose));

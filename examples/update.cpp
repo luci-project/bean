@@ -19,17 +19,17 @@ int main(int argc, const char *argv[]) {
 	BeanFile * b = nullptr;
 
 	for (int i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "-d")) {
+		if (!String::compare(argv[i], "-d")) {
 			dependencies = true;
-		} else if (strcmp(argv[i], "-r") == 0) {
+		} else if (String::compare(argv[i], "-r") == 0) {
 			reloc = true;
-		} else if (strncmp(argv[i], "-m", 2) == 0) {
+		} else if (String::compare(argv[i], "-m", 2) == 0) {
 			merge = true;
 			if (!Parser::string(threshold, argv[i] + 2)) {
 				cerr << "Unable to parse merge threshold!" << endl;
 				return EXIT_FAILURE;
 			}
-		} else if (strncmp(argv[i], "-v", 2) == 0) {
+		} else if (String::compare(argv[i], "-v", 2) == 0) {
 			for (size_t j = 1; argv[i][j] != '\0'; j++) {
 				if (argv[i][j] == 'v') {
 					verbose = static_cast<Bean::Verbosity>(1 + static_cast<uint8_t>(verbose));

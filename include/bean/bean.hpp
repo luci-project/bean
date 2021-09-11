@@ -5,11 +5,11 @@
 #include <dlh/container/tree.hpp>
 #include <dlh/stream/output.hpp>
 #include <dlh/stream/buffer.hpp>
-#include <dlh/utils/bytebuffer.hpp>
-#include <dlh/utils/iterator.hpp>
-#include <dlh/utils/string.hpp>
-#include <dlh/utils/xxhash.hpp>
-#include <dlh/utils/math.hpp>
+#include <dlh/bytebuffer.hpp>
+#include <dlh/iterator.hpp>
+#include <dlh/string.hpp>
+#include <dlh/xxhash.hpp>
+#include <dlh/math.hpp>
 
 #include <elfo/elf.hpp>
 
