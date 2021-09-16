@@ -9,7 +9,7 @@ AR ?= ar
 CXX ?= g++
 
 ifeq ($(DIET), 1)
-	CFLAGS ?= -O3
+	CFLAGS ?= -O3 -DDIET -DCAPSTONE_DIET
 	BUILDDIR ?= .build-diet
 	LIBDIR ?= libs-diet
 	BUILDFLAGS_capstone ?= CAPSTONE_DIET=yes CAPSTONE_X86_ATT_DISABLE=yes CAPSTONE_ARCHS="x86" CAPSTONE_USE_SYS_DYN_MEM=no CAPSTONE_STATIC=yes CAPSTONE_SHARED=no
@@ -21,15 +21,16 @@ else
 endif
 
 CFLAGS += -ffunction-sections -fdata-sections
-CFLAGS += -fno-builtin -fno-exceptions -fno-stack-protector -fno-pic -mno-red-zone
+CFLAGS += -fno-builtin -fno-exceptions -fno-stack-protector -fno-pic -mno-red-zone -fPIE
 
 CXXFLAGS ?= -std=c++17 $(CFLAGS) -Wall -Wextra -Wno-switch -Wno-unused-variable -Wno-comment
 CXXFLAGS += -I include -I bean/include/ -I elfo/include/ $(foreach LIB,$(LIBS),-I $(LIB)/include)
 CXXFLAGS += -I dlh/legacy -DVIRTUAL -DUSE_DLH
-CXXFLAGS += -fno-rtti -fno-use-cxa-atexit -fPIE
+CXXFLAGS += -fno-rtti -fno-use-cxa-atexit
 CXXFLAGS += -nostdlib -nostdinc
 
-BUILDFLAGS_dlh ?= CXXFLAGS="$(CXXFLAGS)"
+BUILDFLAGS_capstone += CFLAGS="-I include $(CFLAGS) -DCAPSTONE_HAS_X86 -DCAPSTONE_X86_ATT_DISABLE"
+BUILDFLAGS_dlh += CXXFLAGS="$(CXXFLAGS)"
 
 BUILDINFO = $(BUILDDIR)/.build_$(LIBNAME).o
 SOURCES = $(shell find $(SRCFOLDER)/ -name "*.cpp")
