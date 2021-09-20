@@ -57,3 +57,7 @@ extern "C" void* memcpy(void * __restrict__ dest, void const * __restrict__ src,
 extern "C" void* memmove(void * dest, void const * src, size_t size) {
 	return Memory::move(dest, src, size);
 }
+
+extern "C" void* memset(void * dest, int c, size_t size) {
+	return Memory::set(dest, c, size);
+}
