@@ -118,3 +118,11 @@ void Bean::dependencies(uintptr_t address, symhash_t & result) const {
 		for (const auto d: sym->deps)
 			dependencies(d, result);
 }
+
+bool Bean::patchable(const symhash_t & diff) {
+	HashSet<const char *> ignore_writeable = { ".eh_frame_hdr", ".eh_frame", ".dynamic", ".data.rel.ro"};
+	for (const auto & d : diff)
+		if (d.section.writeable && !ignore_writeable.contains(d.section.name))
+			return false;
+	return true;
+}

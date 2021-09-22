@@ -259,6 +259,12 @@ struct Bean {
 		return diff(symhash_t(other.symbols), include_dependencies);
 	}
 
+	static bool patchable(const symhash_t & diff);
+
+	bool patchable(const Bean & other, bool include_dependencies = false) const {
+		return patchable(diff(other, include_dependencies));
+	}
+
 	const Symbol * get(uintptr_t address)  const  {
 		auto sym = symbols.floor(address);
 		return sym && address < sym->address + sym->size ? &(*sym) : nullptr;
