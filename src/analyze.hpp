@@ -171,7 +171,7 @@ class Analyze {
 									assert(!Bean::TLS::is_tls(sym.value()));  // check for address space conflicts
 									if (sym.type() != ELF<C>::STT_NOTYPE) {
 										assert(sym.value() >= sym_sec.virt_addr());
-										assert(sym.value() + sym.size() <= sym_sec.virt_addr() + sym_sec.size());
+										assert(sym.value() + sym.size() <= Math::align_up(sym_sec.virt_addr() + sym_sec.size(), sym_sec.alignment()));
 									}
 									if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
 										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
