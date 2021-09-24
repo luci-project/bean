@@ -19,7 +19,7 @@ class AnalyzeX86 : public Analyze<C> {
 	cs_insn *insn = nullptr;
 
 	/*! \brief use Relocation targets to identify additional symbols */
-	void read_relocations() {
+	void read() {
 		for (const auto & rel : this->relocations)
 			switch (rel.type()) {
 				case ELF<C>::R_X86_64_RELATIVE:
@@ -404,7 +404,7 @@ class AnalyzeX86 : public Analyze<C> {
 				this->debug_stream << "  \e[3m[the global offset table]\e[0m" << endl;
 #endif
 			// 3a. calculate size (if 0), TODO: ignore nops!
-			const size_t max_addr = Math::min(last_addr, Bean::TLS::trans_addr(section->virt_addr() + section->size(), section->tls()));
+			const size_t max_addr = Math::min(last_addr, Bean::TLS::trans_addr(Math::align_up(section->virt_addr() + section->size(), section->alignment()), section->tls()));
 			uintptr_t address = Bean::TLS::virt_addr(sym.address);
 			assert(max_addr >= sym.address);
 			const size_t max_size = max_addr - sym.address;
@@ -625,8 +625,8 @@ class AnalyzeX86 : public Analyze<C> {
 
  public:
 	/*! \brief Constructor */
-	AnalyzeX86(Bean::symtree_t & symbols, const ELF<C> &elf, bool resolve_internal_relocations, bool debug, size_t buffer_size)
-	 : Analyze<C>(symbols, elf, resolve_internal_relocations, debug, buffer_size) {
+	AnalyzeX86(Bean::symtree_t & symbols, const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size)
+	 : Analyze<C>(symbols, elf, dbgsym, resolve_internal_relocations, debug, buffer_size) {
 		// Prepare disassembler: Open Handle
 		assert(elf.header.ident_class() != ELF<C>::ELFCLASSNONE);
 		if (::cs_open(CS_ARCH_X86, elf.header.ident_class() == ELF<C>::ELFCLASS32 ? CS_MODE_32 : CS_MODE_64, &cshandle) != CS_ERR_OK)

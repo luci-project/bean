@@ -173,7 +173,7 @@ struct Bean {
 		void dump(BufferStream & bs, Verbosity level = VERBOSE, const symtree_t * symbols = nullptr, const char * prefix = nullptr) const;
 
 		bool operator==(const Symbol & that) const {
-			return this->id == that.id && this->refs.size() == that.refs.size() && this->deps.size() == that.deps.size();
+			return this->id == that.id && this->refs.size() == that.refs.size() && this->rels.size() == that.rels.size(); // && this->deps.size() == that.deps.size();
 		}
 	};
 
@@ -224,8 +224,8 @@ struct Bean {
 
 	const symtree_t symbols;
 
-	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, bool resolve_internal_relocations = true, bool debug = false, size_t buffer_size = 1048576);
-	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, bool resolve_internal_relocations = true, bool debug = false, size_t buffer_size = 1048576);
+	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, const ELF<ELF_Def::Identification::ELFCLASS32> * dbgsym = nullptr, bool resolve_internal_relocations = true, bool debug = false, size_t buffer_size = 1048576);
+	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, const ELF<ELF_Def::Identification::ELFCLASS64> * dbgsym = nullptr, bool resolve_internal_relocations = true, bool debug = false, size_t buffer_size = 1048576);
 
 	void dump(BufferStream & bs, Verbosity level = NONE) const;
 

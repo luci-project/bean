@@ -8,6 +8,7 @@ int main(int argc, const char *argv[]) {
 	Bean::Verbosity verbose = Bean::NONE;
 
 	bool dependencies = false;
+	bool dbgsym = false;
 	bool reloc = false;
 	bool merge = false;
 	size_t threshold = 0;
@@ -19,6 +20,8 @@ int main(int argc, const char *argv[]) {
 	for (int i = 1; i < argc; i++) {
 		if (!String::compare(argv[i], "-d")) {
 			dependencies = true;
+		} else if (String::compare(argv[i], "-s") == 0) {
+			dbgsym = true;
 		} else if (String::compare(argv[i], "-r") == 0) {
 			reloc = true;
 		} else if (String::compare(argv[i], "-m", 2) == 0) {
@@ -49,18 +52,18 @@ int main(int argc, const char *argv[]) {
 	}
 
 	if (new_path == nullptr) {
-		cerr << "Usage: " << argv[0] << "[-d] [-v[v[v]]] [-m[THRESHOLD]] OLD NEW" << endl;
+		cerr << "Usage: " << argv[0] << "[-d] [-s] [-r] [-v[v[v]]] [-m[THRESHOLD]] OLD NEW" << endl;
 		return EXIT_FAILURE;
 	}
 
-	BeanFile old_file(old_path, reloc, verbose >= Bean::DEBUG);
-	BeanFile new_file(new_path, reloc, verbose >= Bean::DEBUG);
+	BeanFile old_file(old_path, dbgsym, reloc, verbose >= Bean::DEBUG);
+	BeanFile new_file(new_path, dbgsym, reloc, verbose >= Bean::DEBUG);
 
 	auto & diff = new_file.bean.diff(old_file.bean, dependencies);
 
 	cout << "# Changes at update of "
-	     << old_file.path << " (" << old_file.size << " bytes) with "
-	     << new_file.path << " (" << new_file.size << " bytes)" << endl;
+	     << old_file.binary.path << " (" << old_file.binary.size << " bytes) with "
+	     << new_file.binary.path << " (" << new_file.binary.size << " bytes)" << endl;
 	Bean::dump(cout, diff, verbose);
 	cout << endl;
 

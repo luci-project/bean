@@ -25,12 +25,15 @@ class Analyze {
 	/*! \brief ELF file to analyze */
 	const ELF<C> &elf;
 
+	/*! \brief Optional ELF debug symbols (stripped into separate file) */
+	const ELF<C> * dbgsym;
+
 	/*! \brief Should internal relocations be resolved
 	 * \note security risk with irelative!
 	 */
 	const bool resolve_internal_relocations;
 
-	/*! \brief Temporary container for relevant sections of elf file*/
+	/*! \brief Temporary container for relevant sections of elf file */
 	TreeSet<typename ELF<C>::Section, Bean::SymbolAddressComparison> sections;
 
 	/*! \brief Temporary container for relevant relocations */
@@ -49,11 +52,12 @@ class Analyze {
 	uintptr_t tls_end = 0;
 
 	/*! \brief Constructor */
-	Analyze(Bean::symtree_t & symbols, const ELF<C> &elf, bool resolve_internal_relocations, bool debug, size_t buffer_size) :
+	Analyze(Bean::symtree_t & symbols, const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) :
 #ifdef BEAN_VERBOSE
 	  debug_buffer(debug ? Memory::alloc<char>(buffer_size) : nullptr), debug(debug), debug_stream(debug_buffer, buffer_size),
 #endif
-	  symbols(symbols), elf(elf), resolve_internal_relocations(resolve_internal_relocations) {
+	  symbols(symbols), elf(elf), dbgsym(dbgsym), resolve_internal_relocations(resolve_internal_relocations) {
+		assert(elf.header.valid());
 #ifdef BEAN_VERBOSE
 		if (debug)
 			assert(debug_buffer != nullptr);
@@ -61,6 +65,17 @@ class Analyze {
 		(void) buffer_size;
 		assert(!debug && "debug data not available in DIET mode");
 #endif
+		if (dbgsym != nullptr) {
+			assert(dbgsym->header.valid());
+			assert(elf.header.ident_class() == dbgsym->header.ident_class());
+			assert(elf.header.ident_data() == dbgsym->header.ident_data());
+			assert(elf.header.ident_version() == dbgsym->header.ident_version());
+			assert(elf.header.ident_abi() == dbgsym->header.ident_abi());
+			assert(elf.header.ident_abiversion() == dbgsym->header.ident_abiversion());
+			assert(elf.header.type() == dbgsym->header.type());
+			assert(elf.header.machine() == dbgsym->header.machine());
+			assert(elf.header.version() == dbgsym->header.version());
+		}
 	}
 
 	/*! \brief Destructor */
@@ -105,9 +120,9 @@ class Analyze {
 	/*! \brief Read ELF program header table
 	 * Gather page size, GOT and TLS start & end address
 	 */
-	virtual void read_phdr() {
+	virtual void read(const typename ELF<C>::template Array<typename ELF<C>::Segment> & elf_segments) {
 		// Read Program header table
-		for (const auto & segment: elf.segments) {
+		for (const auto & segment: elf_segments) {
 			switch (segment.type()) {
 				case ELF<C>::PT_TLS:
 					tls_start = segment.virt_addr();
@@ -138,9 +153,9 @@ class Analyze {
 	/*! \brief Read ELF section header table
 	 * Gather sections, relocations and (defined) symbols
 	 */
-	virtual void read_shdr() {
-		for (const auto & section: elf.sections) {
-			if (section.allocate())
+	virtual void read(const typename ELF<C>::template Array<typename ELF<C>::Section> & elf_sections, bool add_sections = true) {
+		for (const auto & section: elf_sections) {
+			if (section.allocate() && add_sections)
 				sections.insert(section);
 			switch(section.type()) {
 				// TODO: Read relocations, since they need to be compared as well (especially undefined ones...)
@@ -163,7 +178,7 @@ class Analyze {
 
 							default:
 							{
-								auto sym_sec = elf.sections[sym.section_index()];
+								auto sym_sec = elf_sections[sym.section_index()];
 								if (sym.type() == ELF<C>::STT_TLS) {
 									assert(sym_sec.tls());
 									insert_symbol(Bean::TLS::trans_addr(tls_start + sym.value(), true), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
@@ -173,7 +188,7 @@ class Analyze {
 										assert(sym.value() >= sym_sec.virt_addr());
 										assert(sym.value() + sym.size() <= Math::align_up(sym_sec.virt_addr() + sym_sec.size(), sym_sec.alignment()));
 									}
-									if (sym.value() != 0 && elf.sections[sym.section_index()].allocate())
+									if (sym.value() != 0 && elf_sections[sym.section_index()].allocate())
 										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
 								}
 							}
@@ -187,8 +202,8 @@ class Analyze {
 		}
 	}
 
-	/*! \brief Use Relocation targets (if possible) to identify additional symbols */
-	virtual void read_relocations() {}
+	/*! \brief Additional read operation, arch depending */
+	virtual void read() {}
 
 	/*! \brief Find additional function start addresses (if possible) */
 	virtual void find_additional_functions() {}
@@ -243,9 +258,11 @@ class Analyze {
 	/*! \brief Run all analyzation steps */
 	virtual void run() {
 		// 1. Read symbols and segments from ELF tables
-		read_phdr();
-		read_shdr();
-		read_relocations();
+		read(elf.segments);
+		read(elf.sections);
+		if (dbgsym != nullptr)
+			read(dbgsym->sections, false);
+		read();
 
 		// 2. Gather (additional) function start addresses by reading call-targets
 		find_additional_functions();

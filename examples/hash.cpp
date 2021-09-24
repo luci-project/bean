@@ -6,17 +6,20 @@
 int main(int argc, const char *argv[]) {
 	// Check arguments
 	if (argc < 2) {
-		cerr << "Usage: " << argv[0] << " [-r] [-v[v[v]]] ELF-FILES" << endl;
+		cerr << "Usage: " << argv[0] << " [-r] [-s] [-v[v[v]]] ELF-FILES" << endl;
 		return EXIT_FAILURE;
 	}
 
 	Bean::Verbosity verbose = Bean::NONE;
 	bool reloc = false;
+	bool dbgsym = false;
 	bool explain = false;
 
 	for (int i = 1; i < argc; i++) {
 		if (String::compare(argv[i], "-r") == 0) {
 			reloc = true;
+		} else if (String::compare(argv[i], "-s") == 0) {
+			dbgsym = true;
 		} else if (String::compare(argv[i], "-v", 2) == 0) {
 			for (size_t j = 1; argv[i][j] != '\0'; j++) {
 				if (argv[i][j] == 'v') {
@@ -30,8 +33,8 @@ int main(int argc, const char *argv[]) {
 			cerr << "Unsupported parameter '" << argv[i] << endl;
 			return EXIT_FAILURE;
 		} else {
-			BeanFile file(argv[i], reloc, verbose >= Bean::DEBUG);
-			cout << "# " << file.path << " (" << file.size << " bytes):" << endl;
+			BeanFile file(argv[i], dbgsym, reloc, verbose >= Bean::DEBUG);
+			cout << "# " << file.binary.path << " (" << file.binary.size << " bytes):" << endl;
 			file.bean.dump(cout, verbose);
 			cout << endl;
 		}

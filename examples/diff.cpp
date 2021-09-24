@@ -7,6 +7,7 @@ int main(int argc, const char *argv[]) {
 	Bean::Verbosity verbose = Bean::NONE;
 
 	bool dependencies = false;
+	bool dbgsym = false;
 	bool reloc = false;
 	const char * old_path = nullptr;
 	const char * new_path = nullptr;
@@ -16,6 +17,8 @@ int main(int argc, const char *argv[]) {
 	for (int i = 1; i < argc; i++) {
 		if (!String::compare(argv[i], "-d")) {
 			dependencies = true;
+		} else if (String::compare(argv[i], "-s") == 0) {
+			dbgsym = true;
 		} else if (String::compare(argv[i], "-r") == 0) {
 			reloc = true;
 		} else if (String::compare(argv[i], "-v", 2) == 0) {
@@ -40,12 +43,12 @@ int main(int argc, const char *argv[]) {
 	}
 
 	if (new_path == nullptr) {
-		cerr << "Usage: " << argv[0] << "[-d] [-s] [-v[v]] OLD NEW" << endl;
+		cerr << "Usage: " << argv[0] << "[-d] [-s] [-r] [-v[v]] OLD NEW" << endl;
 		return EXIT_FAILURE;
 	}
 
-	BeanFile old_file(old_path, reloc, verbose >= Bean::DEBUG);
-	BeanFile new_file(new_path, reloc, verbose >= Bean::DEBUG);
+	BeanFile old_file(old_path, dbgsym, reloc, verbose >= Bean::DEBUG);
+	BeanFile new_file(new_path, dbgsym, reloc, verbose >= Bean::DEBUG);
 
 	auto & diff = new_file.bean.diff(old_file.bean, dependencies);
 

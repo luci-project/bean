@@ -6,7 +6,7 @@
 
 
 template<ELFCLASS C>
-Bean::symtree_t analyze(const ELF<C> &elf, bool resolve_internal_relocations, bool debug, size_t buffer_size) {
+Bean::symtree_t analyze(const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) {
 	// Result
 	Bean::symtree_t symbols;
 
@@ -15,7 +15,7 @@ Bean::symtree_t analyze(const ELF<C> &elf, bool resolve_internal_relocations, bo
 			case Elf::EM_386:
 			case Elf::EM_486:
 			case Elf::EM_X86_64:
-				AnalyzeX86(symbols, elf, resolve_internal_relocations, debug, buffer_size).run();
+				AnalyzeX86(symbols, elf, dbgsym, resolve_internal_relocations, debug, buffer_size).run();
 				break;
 
 			default:
@@ -81,9 +81,9 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 }
 
 
-Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, bool resolve_internal_relocations, bool debug, size_t buffer_size) : symbols(analyze(elf, resolve_internal_relocations, debug, buffer_size)) {}
+Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, const ELF<ELF_Def::Identification::ELFCLASS32> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) : symbols(analyze(elf, dbgsym, resolve_internal_relocations, debug, buffer_size)) {}
 
-Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, bool resolve_internal_relocations, bool debug, size_t buffer_size) : symbols(analyze(elf, resolve_internal_relocations, debug, buffer_size)) {}
+Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, const ELF<ELF_Def::Identification::ELFCLASS64> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) : symbols(analyze(elf, dbgsym, resolve_internal_relocations, debug, buffer_size)) {}
 
 /*! \brief Merge memory areas */
 const Bean::memarea_t Bean::merge(const symtree_t & symbols, size_t threshold) const {
