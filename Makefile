@@ -81,7 +81,7 @@ $(TARGET): $(LIBDIR)/$(TARGET) $(EXTLIBS) | $(MAKEFILE_LIST)
 
 example-%: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) $(TARGET) $(EXTLIBS) |
 	@echo "CXX		$@"
-	$(VERBOSE) $(CXX) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
+	$(VERBOSE) $(CXX) $(CXXFLAGS) -static -o $@ $< $(LDFLAGS)
 
 examples: $(EXAMPLES)
 	echo $^
