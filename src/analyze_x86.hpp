@@ -41,9 +41,8 @@ class AnalyzeX86 : public Analyze<C> {
 						auto sec = this->sections.floor(static_cast<uintptr_t>(rel.offset()));
 						assert(sec);
 						assert(sec->allocate());
-						//assert(sec->writeable());
+						assert(sec->writeable());
 						assert(!sec->executable());
-						assert(sec->type() != ELF<C>::SHT_NOBITS);
 					}
 #endif
 			}
@@ -565,6 +564,12 @@ class AnalyzeX86 : public Analyze<C> {
 			} else {
 				// 3c. Link relocations to (data) symbols
 				bool is_bss = section->type() == ELF<C>::SHT_NOBITS;
+				auto seg = this->segments.floor(address);
+				assert(seg);
+				assert(address + sym.size <= Math::align_up(seg->virt_addr() + seg->virt_size(), seg->alignment()));
+				if (address >= seg->virt_addr() + seg->size())
+					is_bss = true;
+
 				if (!is_bss)
 					for (auto relocation = this->relocations.ceil(sym); relocation != this->relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
 						auto r = sym.rels.emplace(*relocation, this->resolve_internal_relocations, this->global_offset_table);

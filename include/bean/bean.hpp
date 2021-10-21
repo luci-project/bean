@@ -197,6 +197,17 @@ struct Bean {
 		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Section & lhs, uintptr_t rhs) { return compare(TLS::trans_addr(lhs.virt_addr(), lhs.tls()), rhs); }
 		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Section & lhs, uintptr_t rhs) { return compare(TLS::trans_addr(lhs.virt_addr(), lhs.tls()), rhs); }
 
+		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Segment & lhs, const typename ELF<ELF_Def::Identification::ELFCLASS32>::Segment & rhs) { return compare(lhs.offset(), rhs.offset()); }
+		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Segment & lhs, const typename ELF<ELF_Def::Identification::ELFCLASS64>::Segment & rhs) { return compare(lhs.offset(), rhs.offset()); }
+		static inline int compare(const Symbol & lhs, const typename ELF<ELF_Def::Identification::ELFCLASS32>::Segment & rhs) { return compare(TLS::virt_addr(lhs.address), rhs.offset()); }
+		static inline int compare(const Symbol & lhs, const typename ELF<ELF_Def::Identification::ELFCLASS64>::Segment & rhs) { return compare(TLS::virt_addr(lhs.address), rhs.offset()); }
+		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Segment & lhs, const Symbol & rhs) { return compare(lhs.offset(), TLS::virt_addr(rhs.address)); }
+		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Segment & lhs, const Symbol & rhs) { return compare(lhs.offset(), TLS::virt_addr(rhs.address)); }
+		static inline int compare(uintptr_t lhs, const typename ELF<ELF_Def::Identification::ELFCLASS32>::Segment & rhs) { return compare(lhs, rhs.offset()); }
+		static inline int compare(uintptr_t lhs, const typename ELF<ELF_Def::Identification::ELFCLASS64>::Segment & rhs) { return compare(lhs, rhs.offset()); }
+		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Segment & lhs, uintptr_t rhs) { return compare(lhs.offset(), rhs); }
+		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Segment & lhs, uintptr_t rhs) { return compare(lhs.offset(), rhs); }
+
 		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Relocation & lhs, const typename ELF<ELF_Def::Identification::ELFCLASS32>::Relocation & rhs) { return compare(lhs.offset(), rhs.offset()); }
 		static inline int compare(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Relocation & lhs, const typename ELF<ELF_Def::Identification::ELFCLASS64>::Relocation & rhs) { return compare(lhs.offset(), rhs.offset()); }
 		static inline int compare(const Symbol & lhs, const typename ELF<ELF_Def::Identification::ELFCLASS32>::Relocation & rhs) { return compare(TLS::virt_addr(lhs.address), rhs.offset()); }

@@ -39,6 +39,9 @@ class Analyze {
 	/*! \brief Temporary container for relevant relocations */
 	TreeSet<typename ELF<C>::Relocation, Bean::SymbolAddressComparison> relocations;
 
+	/*! \brief Temporary container for relevant load segments of elf file */
+	TreeSet<typename ELF<C>::Segment, Bean::SymbolAddressComparison> segments;
+
 	/*! \brief Page size granularity */
 	size_t page_size = 0x1000;
 
@@ -132,6 +135,9 @@ class Analyze {
 				case ELF<C>::PT_LOAD:
 					if (page_size < segment.alignment())
 						page_size = segment.alignment();
+					segments.insert(segment);
+					if (segment.size() < segment.virt_size())
+						insert_symbol(segment.virt_addr() + segment.size(), 0, nullptr, nullptr, segment.writeable(), segment.executable());
 					break;
 
 				case ELF<C>::PT_DYNAMIC:
