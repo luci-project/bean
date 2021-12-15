@@ -5,4 +5,6 @@ build:
   image: inf4/stubs:gcc-x64
   script:
     - make
-
+  artifacts:
+    paths:
+      - "example-*"
