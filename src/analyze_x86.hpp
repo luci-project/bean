@@ -51,7 +51,8 @@ class AnalyzeX86 : public Analyze<C> {
 	/*! \brief Find additional function start addresses
 	 * In dissassembled executable sections,
 	 *  - the target address of a `call` instruction and
-	 *  - `ret; [nop;] endbr64` statements
+	 *  - `ret; [nop;] endbr64` statements (when compiled with
+	 *     support for Intel CET / IBT [indirect-branch tracking])
 	 * hint a function start.
 	 */
 	void find_additional_functions() {
@@ -516,7 +517,8 @@ class AnalyzeX86 : public Analyze<C> {
 							case X86_OP_MEM:
 								// Handle FS segment (TLS in Linux)
 								if (op.mem.segment == X86_REG_FS) {
-									const auto target = Bean::TLS::trans_addr(this->tls_end + op.mem.disp, true);
+									auto tls_end = this->tls_segment.has_value() ? Math::align_up(this->tls_segment.value().virt_addr() + this->tls_segment.value().virt_size(), this->tls_segment.value().alignment()) : 0;
+									const auto target = Bean::TLS::trans_addr(tls_end + op.mem.disp, true);
 									sym.refs.insert(target);
 #ifdef BEAN_VERBOSE
 									op_debug[o].hashed = false;
@@ -564,10 +566,9 @@ class AnalyzeX86 : public Analyze<C> {
 			} else {
 				// 3c. Link relocations to (data) symbols
 				bool is_bss = section->type() == ELF<C>::SHT_NOBITS;
-				auto seg = this->segments.floor(address);
-				assert(seg);
-				assert(address + sym.size <= Math::align_up(seg->virt_addr() + seg->virt_size(), seg->alignment()));
-				if (address >= seg->virt_addr() + seg->size())
+				typename ELF<C>::Segment &seg = section->tls() ? this->tls_segment.value() : *this->segments.floor(address);
+				assert(address + sym.size <= Math::align_up(seg.virt_addr() + seg.virt_size(), seg.alignment()));
+				if (address >= seg.virt_addr() + seg.size())
 					is_bss = true;
 
 				if (!is_bss)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <dlh/container/optional.hpp>
 #include <bean/bean.hpp>
 
 template<ELFCLASS C>
@@ -48,11 +49,8 @@ class Analyze {
 	/*! \brief Address of global offset table (GOT) in virt memory */
 	uintptr_t global_offset_table = 0;
 
-	/*! \brief Begin of Thread Local Storage (TLS) Image */
-	uintptr_t tls_start = 0;
-
-	/*! \brief End of Thread Local Storage (TLS) Image */
-	uintptr_t tls_end = 0;
+	/*! \brief TLS Segment */
+	Optional<typename ELF<C>::Segment> tls_segment;
 
 	/*! \brief Constructor */
 	Analyze(Bean::symtree_t & symbols, const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) :
@@ -128,8 +126,8 @@ class Analyze {
 		for (const auto & segment: elf_segments) {
 			switch (segment.type()) {
 				case ELF<C>::PT_TLS:
-					tls_start = segment.virt_addr();
-					tls_end = Math::align_up(segment.virt_addr() + segment.virt_size(), segment.alignment());
+					assert(!tls_segment.has_value());
+					tls_segment = segment;
 					break;
 
 				case ELF<C>::PT_LOAD:
@@ -187,7 +185,8 @@ class Analyze {
 								auto sym_sec = elf_sections[sym.section_index()];
 								if (sym.type() == ELF<C>::STT_TLS) {
 									assert(sym_sec.tls());
-									insert_symbol(Bean::TLS::trans_addr(tls_start + sym.value(), true), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
+									assert(tls_segment.has_value());
+									insert_symbol(Bean::TLS::trans_addr(tls_segment.value().virt_addr() + sym.value(), true), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
 								} else {
 									assert(!Bean::TLS::is_tls(sym.value()));  // check for address space conflicts
 									if (sym.type() != ELF<C>::STT_NOTYPE) {
