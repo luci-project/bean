@@ -106,7 +106,7 @@ struct BeanFile {
 			path.clear();
 
 			// In a subdirectory called ".debug/"
-			char * slash = String::find_last(binpath, '/');
+			char * slash = const_cast<char*>(String::find_last(binpath, '/'));
 			if (slash != nullptr) {
 				path.write(binpath, slash - binpath);
 				path << "/.debug" << slash << ".debug";

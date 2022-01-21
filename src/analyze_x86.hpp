@@ -233,7 +233,7 @@ class AnalyzeX86 : public Analyze<C> {
 			}
 		}
 		this->debug_stream << "\e[34m" << insn->mnemonic << "\e[0m ";
-		auto ops = String::split(insn->op_str, ',');
+		auto ops = String::split_inplace(insn->op_str, ',');
 		for (int o = 0; o < detail_x86.op_count; o++) {
 			if (o > 0)
 				this->debug_stream << "\e[36m,";
