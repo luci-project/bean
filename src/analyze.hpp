@@ -159,7 +159,10 @@ class Analyze {
 	 */
 	virtual void read(const typename ELF<C>::template Array<typename ELF<C>::Section> & elf_sections, bool add_sections = true) {
 		for (const auto & section: elf_sections) {
-			if (section.allocate() && add_sections)
+			if (section.size() == 0)
+				continue;
+			else if (section.allocate() && add_sections)
+				// TODO: What if sections overlap?
 				sections.insert(section);
 			switch(section.type()) {
 				// TODO: Read relocations, since they need to be compared as well (especially undefined ones...)
