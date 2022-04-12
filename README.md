@@ -30,7 +30,7 @@ The `examples` directory contains a few example programs, which can be built usi
 
 ### Hash
 
-Generate the hash values for the symbols in the given ELF files using `example-hash`
+Generate the hash values for the symbols in the given ELF files using `bean-hash`
 Use the verbose parameter (`-v`, `-vv`, `-vvv`) for additional information about the generation of the hashes:
 
 Disassembled instructions are color-coded to highlight excluded parts for the
@@ -39,14 +39,14 @@ hashing. Moreover, all references and relocations are resolved.
 
 ### Diff
 
-Changed symbols of two given ELF files are highlighted in a diff typical manner by `example-diff`.
+Changed symbols of two given ELF files are highlighted in a diff typical manner by `bean-diff`.
 Increase the verbosity level for additional information about the changed
 symbols.
 
 
 ### Update
 
-Check if an ELF file can be live-updated by another ELF file with `example-update`
+Check if an ELF file can be live-updated by another ELF file with `bean-update`
 
 
 Name
