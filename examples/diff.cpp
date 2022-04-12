@@ -43,7 +43,7 @@ int main(int argc, const char *argv[]) {
 	}
 
 	if (new_path == nullptr) {
-		cerr << "Usage: " << argv[0] << "[-d] [-s] [-r] [-v[v]] OLD NEW" << endl;
+		cerr << "Usage: " << argv[0] << " [-d] [-s] [-r] [-v[v]] OLD NEW" << endl;
 		return EXIT_FAILURE;
 	}
 
