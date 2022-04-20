@@ -232,9 +232,11 @@ class AnalyzeX86 : public Analyze<C> {
 				this->debug_stream << "   ";
 			}
 		}
+		// TODO: Not every op is separated by a space...
 		this->debug_stream << "\e[34m" << insn->mnemonic << "\e[0m ";
 		auto ops = String::split_inplace(insn->op_str, ',');
-		for (int o = 0; o < detail_x86.op_count; o++) {
+		assert(ops.size() <= detail_x86.op_count);
+		for (size_t o = 0; o < ops.size(); o++) {
 			if (o > 0)
 				this->debug_stream << "\e[36m,";
 			if (!op_debug[o].hashed)
