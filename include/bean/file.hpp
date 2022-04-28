@@ -3,6 +3,7 @@
 #include <dlh/stream/buffer.hpp>
 #include <dlh/stream/output.hpp>
 #include <dlh/stream/string.hpp>
+#include <dlh/environ.hpp>
 #include <dlh/syscall.hpp>
 #include <dlh/file.hpp>
 
@@ -81,13 +82,18 @@ struct BeanFile {
 
 		StringStream<PATH_MAX + 1> path;
 
+		// Environment variable DEBUG_ROOT to search debug symbols in other locations
+		const char * debug_root = Environ::variable("DEBUG_ROOT");
+		if (debug_root == nullptr)
+			debug_root = "";
+
 		// check debug symbol using build ID
 		for (auto & section: binary.content.sections)
 			if (section.type() == Elf::SHT_NOTE)
 				for (auto & note : section.get_notes())
 					if (note.name() != nullptr && strcmp(note.name(), "GNU") == 0 && note.type() == Elf::NT_GNU_BUILD_ID) {
 							auto desc = reinterpret_cast<const uint8_t *>(note.description());
-							path << "/usr/lib/debug/.build-id/" << hex << right << setfill('0') << setw(2) << static_cast<uint32_t>(desc[0]) << '/';
+							path << debug_root << "/usr/lib/debug/.build-id/" << hex << right << setfill('0') << setw(2) << static_cast<uint32_t>(desc[0]) << '/';
 							for (size_t i = 1; i < note.size(); i++)
 								path << hex << right << setfill('0') << setw(2)  << static_cast<uint32_t>(desc[i]);
 							path << ".debug";
@@ -116,7 +122,7 @@ struct BeanFile {
 			}
 
 			// With path as subdirectory in global debug folder
-			path << "/usr/lib/debug" << binpath << ".debug";
+			path << debug_root << "/usr/lib/debug" << binpath << ".debug";
 			if (File::readable(path.str()))
 				return new ElfFile(path.str());
 		}
