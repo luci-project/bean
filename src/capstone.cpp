@@ -61,3 +61,30 @@ extern "C" void* memmove(void * dest, void const * src, size_t size) {
 extern "C" void* memset(void * dest, int c, size_t size) {
 	return Memory::set(dest, c, size);
 }
+
+bool capstone_dump(BufferStream & out, void * ptr, size_t size, uintptr_t start) {
+	csh cshandle;
+	bool r = false;
+	if (::cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) == CS_ERR_OK) {
+		cs_insn *insn = cs_malloc(cshandle);
+		if (insn != nullptr) {
+			while (cs_disasm_iter(cshandle, reinterpret_cast<const uint8_t **>(ptr), &size, &start, insn)) {
+				// Address
+				out.format("0x%10llx: ", insn->address);
+				// Machine Bytes
+				for (size_t i = 0; i < 15; i++) {
+					if (i < insn->size)
+						out.format("%2x ", static_cast<unsigned>(insn->bytes[i]));
+					else
+						out.format("   ");
+				}
+				// Mnemonix + opstring
+				out.format("%s %s\n", insn->mnemonic, insn->op_str);
+			}
+			r = true;
+			cs_free(insn, 1);
+		}
+		cs_close(&cshandle);
+	}
+	return r;
+}
