@@ -10,7 +10,7 @@ void Bean::Symbol::dump_name(BufferStream& bs) const {
 	if (TLS::is_tls(address))
 		bs << "TLS:";
 	if (name != nullptr && name[0] != '\0')
-		bs << "\e[1m" << name << "\e[21m (";
+		bs << "\e[1m" << name << "\e[22m (";
 	else
 		bs << "unnamed ";
 
@@ -20,7 +20,7 @@ void Bean::Symbol::dump_name(BufferStream& bs) const {
 	if (section.name != nullptr)
 		bs << ", " << section.name;
 
-	bs << " [r" << (section.writeable ? 'w' : '-') << (section.executable ? 'x' : '-') << ']';
+	bs << " [r" << (section.writeable ? (section.relro ? '*' : 'w') : '-') << (section.executable ? 'x' : '-') << ']';
 	if (name != nullptr && name[0] != '\0')
 		bs << ')';
 }
@@ -67,7 +67,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 			bs << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
 			   << "0x" << setw(16) << setfill('0') << hex << TLS::virt_addr(address)
 			   << dec << setw(7) << setfill(' ') << right << size << ' '
-			   << (section.writeable ? 'W' : ' ') << (section.executable ? 'X' : ' ') << (TLS::is_tls(address) ? 'T' : ' ');
+			   << (section.writeable ? (section.relro ? 'R' : 'W') : ' ') << (section.executable ? 'X' : ' ') << (TLS::is_tls(address) ? 'T' : ' ');
 			if (name != nullptr && name[0] != '\0')
 				bs << ' ' << name;
 			if (section.name != nullptr)
@@ -164,7 +164,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 		if (id.valid()) {
 			bs << prefix << "  \e[1mID: ";
 			id.dump(bs);
-			bs << "\e[21m" << endl;
+			bs << "\e[22m" << endl;
 		}
 
 		bs << endl;

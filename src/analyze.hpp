@@ -1,6 +1,7 @@
 #pragma once
 
 #include <dlh/container/optional.hpp>
+#include <dlh/container/pair.hpp>
 #include <bean/bean.hpp>
 
 template<ELFCLASS C>
@@ -48,6 +49,15 @@ class Analyze {
 
 	/*! \brief Address of global offset table (GOT) in virt memory */
 	uintptr_t global_offset_table = 0;
+
+	/*! \brief Dynamic start and size in virt memory*/
+	Pair<uintptr_t, size_t> dynamic = {0, 0};
+
+	/*! \brief Relocation-ReadOnly start and size in virt memory*/
+	Pair<uintptr_t, size_t> relro = {0, 0};
+
+	/*! \brief Exception handling start and size in virt memory*/
+	Pair<uintptr_t, size_t> eh_frame = {0, 0};
 
 	/*! \brief TLS Segment */
 	Optional<typename ELF<C>::Segment> tls_segment;
@@ -139,6 +149,7 @@ class Analyze {
 					break;
 
 				case ELF<C>::PT_DYNAMIC:
+					dynamic = {segment.virt_addr(), segment.virt_size()};
 					for (const auto & dyn: segment.get_dynamic())
 						switch(dyn.tag()) {
 							case ELF<C>::DT_PLTGOT:
@@ -149,6 +160,13 @@ class Analyze {
 						}
 					break;
 
+				case ELF<C>::PT_GNU_RELRO:
+					relro = {segment.virt_addr(), segment.virt_size()};
+					break;
+
+				case ELF<C>::PT_GNU_EH_FRAME:
+					eh_frame = {segment.virt_addr(), segment.virt_size()};
+					break;
 				// TODO: Other segment entries can be used to insert symbol borders
 			}
 		}
@@ -208,6 +226,14 @@ class Analyze {
 					continue;
 			}
 		}
+	}
+
+	/*! \brief Mark symbols in relocation read-only section */
+	virtual void mark_relro() {
+		if (relro.first != 0 && relro.second != 0)
+			for (auto & sym : symbols)
+				if (sym.address >= relro.first && sym.address + sym.size < relro.first + relro.second)
+					sym.section.relro = true;
 	}
 
 	/*! \brief Additional read operation, arch depending */
@@ -274,6 +300,9 @@ class Analyze {
 
 		// 2. Gather (additional) function start addresses by reading call-targets
 		find_additional_functions();
+
+		// 2.5: Mark relocation read only symbols
+		mark_relro();
 
 		// 3. Calculate position independent id
 		hash_internal();

@@ -91,12 +91,12 @@ const Bean::memarea_t Bean::merge(const symtree_t & symbols, size_t threshold) c
 	for (const auto & sym : symbols) {
 		if (!area.empty()) {
 			auto & last = area.back();
-			if (last.writeable == sym.section.writeable && last.executable == sym.section.executable &&  last.address + last.size + threshold >= sym.address) {
+			if (last.writeable == sym.section.writeable && last.executable == sym.section.executable && last.relro == sym.section.relro && last.address + last.size + threshold >= sym.address) {
 				last.size = sym.address + sym.size - last.address;
 				continue;
 			}
 		}
-		area.emplace_back(sym.address, sym.size, sym.section.writeable, sym.section.executable);
+		area.emplace_back(sym.address, sym.size, sym.section.writeable, sym.section.executable, sym.section.relro);
 	}
 	return area;
 }
@@ -120,6 +120,7 @@ void Bean::dependencies(uintptr_t address, symhash_t & result) const {
 }
 
 bool Bean::patchable(const symhash_t & diff) {
+	// TODO: Init sections
 	HashSet<const char *> ignore_writeable = { ".eh_frame_hdr", ".eh_frame", ".dynamic", ".data.rel.ro"};
 	for (const auto & d : diff)
 		if (d.section.writeable && !ignore_writeable.contains(d.section.name))

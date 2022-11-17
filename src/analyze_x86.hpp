@@ -573,7 +573,7 @@ class AnalyzeX86 : public Analyze<C> {
 				if (address >= seg.virt_addr() + seg.size())
 					is_bss = true;
 
-				if (!is_bss)
+				//if (!is_bss) // TODO: Why?
 					for (auto relocation = this->relocations.ceil(sym); relocation != this->relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
 						auto r = sym.rels.emplace(*relocation, this->resolve_internal_relocations, this->global_offset_table);
 						// Add local (internal) relocation as reference
@@ -581,8 +581,9 @@ class AnalyzeX86 : public Analyze<C> {
 							sym.refs.insert(r.first->target);
 					}
 
+
 				// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
-				if (sym.section.writeable)
+				if (sym.section.writeable && !sym.section.relro)
 					id_internal.add<uint32_t>(address % this->page_size);
 
 				// Non-executable objects will be fully hashed
@@ -592,6 +593,9 @@ class AnalyzeX86 : public Analyze<C> {
 					// Do not hash content of relocation targets
 					auto start = address;
 					auto end = address + sym.size;
+					// First entry in GOT is pointer to dynamic, second one unused -- ignore both
+					if (start == this->global_offset_table)
+						start += 2 * sizeof(void*);
 					// Check all relocations
 					for (const auto &rel : sym.rels) {
 						// Get relocation length

@@ -59,12 +59,12 @@ int main(int argc, const char *argv[]) {
 		auto rnext = removed.begin();
 		for (const auto & n : new_file.bean) {
 			while (rnext != removed.end() && rnext->address <= n.address) {
-				rnext->dump(cout, verbose, &old_file.bean.symbols, "\e[31m-");
+				rnext->dump(cout, verbose, &old_file.bean.symbols, "\e[0;31m-");
 				++rnext;
 			}
 			bool dbg = false;
 			if (diff.contains(n)) {
-				n.dump(cout, verbose, &new_file.bean.symbols, "\e[32m+");
+				n.dump(cout, verbose, &new_file.bean.symbols, "\e[0;32m+");
 			} else {
 				n.dump(cout, Bean::VERBOSE, &new_file.bean.symbols, "\e[0m ");
 			}

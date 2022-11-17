@@ -57,8 +57,11 @@ struct Bean {
 		/*! \brief Flag for executable symbol */
 		bool executable = false;
 
-		MemArea(uintptr_t address, size_t size, bool writeable, bool executable)
-		  : address(address), size(size), writeable(writeable), executable(executable) {}
+		/*! \brief Flag for relocation-readonly symbol */
+		bool relro = false;
+
+		MemArea(uintptr_t address, size_t size, bool writeable, bool executable, bool relro = false)
+		  : address(address), size(size), writeable(writeable), executable(executable), relro(relro) {}
 
 	};
 
@@ -120,6 +123,9 @@ struct Bean {
 
 			/*! \brief Flag for executable symbol */
 			bool executable = false;
+
+			/*! \brief Flag for relocation-readonly*/
+			bool relro = false;
 		} section;
 
 		/*! \brief Symbol identifier (hash) */
@@ -158,8 +164,8 @@ struct Bean {
 		/*! \brief Relocations affecting this symbol */
 		TreeSet<SymbolRelocation, SymbolAddressComparison> rels;
 
-		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable)
-		  : address(address), size(size), name(name), section({section_name, writeable, executable}), debug(nullptr) {}
+		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable, bool relro = false)
+		  : address(address), size(size), name(name), section({section_name, writeable, executable, relro}), debug(nullptr) {}
 
 		Symbol(const Symbol &) = default;
 		Symbol(Symbol &&) = default;
