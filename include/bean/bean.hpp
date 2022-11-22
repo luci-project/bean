@@ -58,10 +58,10 @@ struct Bean {
 		bool executable = false;
 
 		/*! \brief Flag for relocation-readonly symbol */
-		bool relro = false;
+		uint16_t flags = 0;
 
-		MemArea(uintptr_t address, size_t size, bool writeable, bool executable, bool relro = false)
-		  : address(address), size(size), writeable(writeable), executable(executable), relro(relro) {}
+		MemArea(uintptr_t address, size_t size, bool writeable, bool executable, uint16_t flags = 0)
+		  : address(address), size(size), writeable(writeable), executable(executable), flags(flags) {}
 
 	};
 
@@ -98,9 +98,11 @@ struct Bean {
 	struct Symbol;
 	struct SymbolAddressComparison;
 	struct SymbolIdentifierComparison;
+	struct SymbolInternalIdentifierComparison;
 
 	typedef TreeSet<Symbol, SymbolAddressComparison> symtree_t;
 	typedef HashSet<Symbol, SymbolIdentifierComparison> symhash_t;
+	typedef HashSet<Symbol, SymbolInternalIdentifierComparison> syminthash_t;
 	typedef Vector<MemArea> memarea_t;
 
 	struct Symbol {
@@ -124,8 +126,30 @@ struct Bean {
 			/*! \brief Flag for executable symbol */
 			bool executable = false;
 
-			/*! \brief Flag for relocation-readonly*/
-			bool relro = false;
+			/*! \brief Flag containing additional section information */
+			enum Flags : uint16_t {
+				SECTION_NONE     = 0,
+				SECTION_RELRO    = 1 <<  0,
+				SECTION_NOTE     = 1 <<  1,
+				SECTION_DYNAMIC  = 1 <<  2,
+				SECTION_VERSION  = 1 <<  3,
+				SECTION_INIT     = 1 <<  4,
+				SECTION_FINI     = 1 <<  5,
+				SECTION_RELOC    = 1 <<  6,
+				SECTION_SYMTAB   = 1 <<  7,
+				SECTION_STRTAB   = 1 <<  8,
+				SECTION_HASH     = 1 <<  9,
+				SECTION_EH_FRAME = 1 << 10,
+				SECTION_NOBITS   = 1 << 11,
+			};
+			uint16_t flags = SECTION_NONE;
+			static_assert(sizeof(Flags) == sizeof(flags), "Wrong flags size");
+
+			/*! \brief check if section flags match */
+			bool operator==(const Section & that) const {
+				return this->writeable == that.writeable && this->executable == that.executable && this->flags == that.flags;
+			}
+
 		} section;
 
 		/*! \brief Symbol identifier (hash) */
@@ -164,8 +188,9 @@ struct Bean {
 		/*! \brief Relocations affecting this symbol */
 		TreeSet<SymbolRelocation, SymbolAddressComparison> rels;
 
-		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable, bool relro = false)
-		  : address(address), size(size), name(name), section({section_name, writeable, executable, relro}), debug(nullptr) {}
+		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable, uint16_t flags = Section::SECTION_NONE)
+		  : address(address), size(size), name(name), section({section_name, writeable, executable, flags}), debug(nullptr) {}
+
 
 		Symbol(const Symbol &) = default;
 		Symbol(Symbol &&) = default;
@@ -179,7 +204,7 @@ struct Bean {
 		void dump(BufferStream & bs, Verbosity level = VERBOSE, const symtree_t * symbols = nullptr, const char * prefix = nullptr) const;
 
 		bool operator==(const Symbol & that) const {
-			return this->id == that.id && this->refs.size() == that.refs.size() && this->rels.size() == that.rels.size(); // && this->deps.size() == that.deps.size();
+			return this->id == that.id && this->section == that.section && this->refs.size() == that.refs.size() && this->rels.size() == that.rels.size(); // && this->deps.size() == that.deps.size();
 		}
 	};
 
@@ -239,6 +264,15 @@ struct Bean {
 		static inline bool equal(const Symbol & lhs, const Symbol & rhs) { return lhs == rhs; }
 	};
 
+	struct SymbolInternalIdentifierComparison: public Comparison {
+		using Comparison::equal;
+		using Comparison::hash;
+
+		static inline uint32_t hash(const Symbol& sym) { return Comparison::hash(sym.id.internal); }
+
+		static inline bool equal(const Symbol & lhs, const Symbol & rhs) { return lhs.id.internal == rhs.id.internal && lhs.section == rhs.section && lhs.refs.size() == rhs.refs.size() && lhs.rels.size() == rhs.rels.size(); }
+	};
+
 	const symtree_t symbols;
 
 	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, const ELF<ELF_Def::Identification::ELFCLASS32> * dbgsym = nullptr, bool resolve_internal_relocations = true, bool debug = false, size_t buffer_size = 1048576);
@@ -248,7 +282,17 @@ struct Bean {
 
 	static void dump(BufferStream & bs, const symtree_t & symbols, Verbosity level = NONE);
 
-	static void dump(BufferStream & bs, const symhash_t & symbols, Verbosity level = NONE);
+	template<class T>
+	static void dump(BufferStream & bs, const HashSet<Symbol, T> & symbols, Verbosity level = NONE) {
+		if (level > NONE) {
+			// Sort output by address
+			dump(bs, symtree_t(symbols), level);
+		} else {
+			// unsorted
+			for (const auto & sym: symbols)
+				sym.dump(bs, level);
+		}
+	}
 
 	static symtree_t::ConstIterator dump_address(BufferStream & bs, uintptr_t value, const symtree_t & symbols);
 
@@ -270,10 +314,22 @@ struct Bean {
 		return merge(diff(other, include_dependencies), threshold);
 	}
 
-	const symhash_t diff(const symhash_t & other_symbols, bool include_dependencies = false) const;
+	template<class T>
+	const HashSet<Symbol, T> diff(const HashSet<Symbol, T> & other_symbols, bool include_dependencies = false) const {
+		HashSet<Symbol, T> result;
+		for (const auto & sym : symbols)
+			if (!other_symbols.contains(sym) && result.insert(sym).second && include_dependencies)
+				for (const auto d: sym.deps)
+					dependencies(d, result);
+		return result;
+	}
 
 	const symhash_t diff(const Bean & other, bool include_dependencies = false) const {
 		return diff(symhash_t(other.symbols), include_dependencies);
+	}
+
+	const syminthash_t diff_internal(const Bean & other, bool include_dependencies = false) const {
+		return diff(syminthash_t(other.symbols), include_dependencies);
 	}
 
 	static bool patchable(const symhash_t & diff);
@@ -300,7 +356,13 @@ struct Bean {
 	}
 
  private:
-	void dependencies(uintptr_t address, symhash_t & result) const;
+	template<class T>
+	void dependencies(uintptr_t address, HashSet<Symbol, T> & result) const {
+		auto sym = symbols.ceil(address);
+		if (sym && result.emplace(*sym).second)
+			for (const auto d: sym->deps)
+				dependencies(d, result);
+	}
 };
 
 static inline BufferStream& operator<<(BufferStream& bs, const Bean::Symbol & sym) {

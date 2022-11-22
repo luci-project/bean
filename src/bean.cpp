@@ -91,39 +91,24 @@ const Bean::memarea_t Bean::merge(const symtree_t & symbols, size_t threshold) c
 	for (const auto & sym : symbols) {
 		if (!area.empty()) {
 			auto & last = area.back();
-			if (last.writeable == sym.section.writeable && last.executable == sym.section.executable && last.relro == sym.section.relro && last.address + last.size + threshold >= sym.address) {
+			if (last.writeable == sym.section.writeable && last.executable == sym.section.executable && last.flags == sym.section.flags && last.address + last.size + threshold >= sym.address) {
 				last.size = sym.address + sym.size - last.address;
 				continue;
 			}
 		}
-		area.emplace_back(sym.address, sym.size, sym.section.writeable, sym.section.executable, sym.section.relro);
+		area.emplace_back(sym.address, sym.size, sym.section.writeable, sym.section.executable, sym.section.flags);
 	}
 	return area;
 }
 
 
-const Bean::symhash_t Bean::diff(const symhash_t & other_symbols, bool include_dependencies) const {
-	symhash_t result;
-	for (const auto & sym : symbols)
-		if (!other_symbols.contains(sym) && result.insert(sym).second && include_dependencies)
-			for (const auto d: sym.deps)
-				dependencies(d, result);
-	return result;
-}
-
-
-void Bean::dependencies(uintptr_t address, symhash_t & result) const {
-	auto sym = symbols.ceil(address);
-	if (sym && result.emplace(*sym).second)
-		for (const auto d: sym->deps)
-			dependencies(d, result);
-}
-
 bool Bean::patchable(const symhash_t & diff) {
 	// TODO: Init sections
-	HashSet<const char *> ignore_writeable = { ".eh_frame_hdr", ".eh_frame", ".dynamic", ".data.rel.ro"};
+	uint16_t ignore = Symbol::Section::SECTION_RELRO | Symbol::Section::SECTION_EH_FRAME | Symbol::Section::SECTION_DYNAMIC;
 	for (const auto & d : diff)
-		if (d.section.writeable && !ignore_writeable.contains(d.section.name))
+		if (d.section.writeable && (d.section.flags & ignore) == 0)
+			return false;
+		else if ((d.section.flags & Symbol::Section::SECTION_INIT) != 0)
 			return false;
 	return true;
 }

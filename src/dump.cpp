@@ -20,7 +20,7 @@ void Bean::Symbol::dump_name(BufferStream& bs) const {
 	if (section.name != nullptr)
 		bs << ", " << section.name;
 
-	bs << " [r" << (section.writeable ? (section.relro ? '*' : 'w') : '-') << (section.executable ? 'x' : '-') << ']';
+	bs << " [r" << (section.writeable ? ((section.flags & Symbol::Section::SECTION_RELRO) != 0 ? '*' : 'w') : '-') << (section.executable ? 'x' : '-') << ']';
 	if (name != nullptr && name[0] != '\0')
 		bs << ')';
 }
@@ -67,7 +67,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 			bs << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
 			   << "0x" << setw(16) << setfill('0') << hex << TLS::virt_addr(address)
 			   << dec << setw(7) << setfill(' ') << right << size << ' '
-			   << (section.writeable ? (section.relro ? 'R' : 'W') : ' ') << (section.executable ? 'X' : ' ') << (TLS::is_tls(address) ? 'T' : ' ');
+			   << (section.writeable ? ((section.flags & Symbol::Section::SECTION_RELRO) != 0 ? 'R' : 'W') : ' ') << (section.executable ? 'X' : ' ') << (TLS::is_tls(address) ? 'T' : ' ');
 			if (name != nullptr && name[0] != '\0')
 				bs << ' ' << name;
 			if (section.name != nullptr)
@@ -181,15 +181,4 @@ void Bean::dump(BufferStream & bs, const symtree_t & symbols, Verbosity level) {
 	Symbol::dump_header(bs, level);
 	for (const auto & sym : symbols)
 		sym.dump(bs, level, &symbols);
-}
-
-void Bean::dump(BufferStream & bs, const symhash_t & symbols, Verbosity level) {
-	if (level > NONE) {
-		// Sort output by address
-		dump(bs, symtree_t(symbols), level);
-	} else {
-		// unsorted
-		for (const auto & sym: symbols)
-			sym.dump(bs, level);
-	}
 }

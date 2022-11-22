@@ -50,14 +50,15 @@ class Analyze {
 	/*! \brief Address of global offset table (GOT) in virt memory */
 	uintptr_t global_offset_table = 0;
 
-	/*! \brief Dynamic start and size in virt memory*/
-	Pair<uintptr_t, size_t> dynamic = {0, 0};
-
-	/*! \brief Relocation-ReadOnly start and size in virt memory*/
-	Pair<uintptr_t, size_t> relro = {0, 0};
-
-	/*! \brief Exception handling start and size in virt memory*/
-	Pair<uintptr_t, size_t> eh_frame = {0, 0};
+	/*! \brief Flags by section */
+	struct SectionFlag {
+		Bean::Symbol::Section::Flags flag;
+		size_t start;
+		size_t size;
+		SectionFlag(Bean::Symbol::Section::Flags flag, size_t start, size_t size) :
+			flag(flag), start(start), size(size) {}
+	};
+	Vector<SectionFlag> section_flags;
 
 	/*! \brief TLS Segment */
 	Optional<typename ELF<C>::Segment> tls_segment;
@@ -144,28 +145,99 @@ class Analyze {
 					if (page_size < segment.alignment())
 						page_size = segment.alignment();
 					segments.insert(segment);
-					if (segment.size() < segment.virt_size())
+					if (segment.size() < segment.virt_size()) {
 						insert_symbol(segment.virt_addr() + segment.size(), 0, nullptr, nullptr, segment.writeable(), segment.executable());
+						section_flags.emplace_back(Bean::Symbol::Section::SECTION_NOBITS, segment.virt_addr() + segment.size(), segment.virt_size() - segment.size());
+					}
 					break;
 
 				case ELF<C>::PT_DYNAMIC:
-					dynamic = {segment.virt_addr(), segment.virt_size()};
+				{
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_DYNAMIC, segment.virt_addr(), segment.virt_size());
+					size_t rel_start = 0;
+					size_t rel_size = 0;
+					size_t strtab_start = 0;
+					size_t strtab_size = 0;
+					size_t preinit_array_start = 0;
+					size_t preinit_array_size = 0;
+					size_t init_array_start = 0;
+					size_t init_array_size = 0;
+					size_t fini_array_start = 0;
+					size_t fini_array_size = 0;
 					for (const auto & dyn: segment.get_dynamic())
+
 						switch(dyn.tag()) {
 							case ELF<C>::DT_PLTGOT:
 								global_offset_table = dyn.value();
 								break;
 
+							case ELF<C>::DT_REL:
+							case ELF<C>::DT_RELA:
+								rel_start = dyn.value();
+								break;
+
+							case ELF<C>::DT_RELSZ:
+							case ELF<C>::DT_RELASZ:
+								rel_size = dyn.value();
+								break;
+
+							case ELF<C>::DT_STRTAB:
+								strtab_start = dyn.value();
+								break;
+
+							case ELF<C>::DT_STRSZ:
+								strtab_size = dyn.value();
+								break;break;
+
+							case ELF<C>::DT_INIT_ARRAY:
+								init_array_start = dyn.value();
+								break;
+
+							case ELF<C>::DT_INIT_ARRAYSZ:
+								init_array_size = dyn.value();
+								break;
+
+							case ELF<C>::DT_PREINIT_ARRAY:
+								preinit_array_start = dyn.value();
+								break;
+
+							case ELF<C>::DT_PREINIT_ARRAYSZ:
+								preinit_array_size = dyn.value();
+								break;
+
+							case ELF<C>::DT_FINI_ARRAY:
+								fini_array_start = dyn.value();
+								break;
+
+							case ELF<C>::DT_FINI_ARRAYSZ:
+								fini_array_size = dyn.value();
+								break;
 							// TODO: Other dynamic entries can be used to insert symbol borders
 						}
+					if (rel_size != 0 )
+						section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELOC, rel_start, rel_size);
+					if (strtab_size != 0 )
+						section_flags.emplace_back(Bean::Symbol::Section::SECTION_STRTAB, strtab_start, strtab_size);
+					if (preinit_array_size != 0 )
+						section_flags.emplace_back(Bean::Symbol::Section::SECTION_INIT, preinit_array_start, preinit_array_size);
+					if (init_array_size != 0 )
+						section_flags.emplace_back(Bean::Symbol::Section::SECTION_INIT, init_array_start, init_array_size);
+					if (fini_array_size != 0 )
+						section_flags.emplace_back(Bean::Symbol::Section::SECTION_FINI, fini_array_start, fini_array_size);
+					break;
+				}
+
+				case ELF<C>::PT_NOTE:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_NOTE, segment.virt_addr(), segment.virt_size());
 					break;
 
 				case ELF<C>::PT_GNU_RELRO:
-					relro = {segment.virt_addr(), segment.virt_size()};
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELRO, segment.virt_addr(), segment.virt_size());
+					insert_symbol(segment.virt_addr() + segment.size(), 0, nullptr, nullptr, true, false);
 					break;
 
 				case ELF<C>::PT_GNU_EH_FRAME:
-					eh_frame = {segment.virt_addr(), segment.virt_size()};
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_EH_FRAME, segment.virt_addr(), segment.virt_size());
 					break;
 				// TODO: Other segment entries can be used to insert symbol borders
 			}
@@ -179,20 +251,59 @@ class Analyze {
 		for (const auto & section: elf_sections) {
 			if (section.size() == 0)
 				continue;
-			else if (section.allocate() && add_sections)
+			else if (section.allocate() && add_sections) {
 				// TODO: What if sections overlap?
 				sections.insert(section);
+				if (strcmp(section.name(), ".init") == 0)
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_INIT, section.virt_addr(), section.size());
+				else if (strcmp(section.name(), ".fini") == 0)
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_FINI, section.virt_addr(), section.size());
+			}
 			switch(section.type()) {
 				// TODO: Read relocations, since they need to be compared as well (especially undefined ones...)
 				case ELF<C>::SHT_REL:
 				case ELF<C>::SHT_RELA:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELOC, section.virt_addr(), section.size());
 					for (const auto & entry : section.get_relocations())
 						relocations.emplace(entry);
 
 					break;
 
+				case ELF<C>::SHT_HASH:
+				case ELF<C>::SHT_GNU_HASH:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_HASH, section.virt_addr(), section.size());
+					break;
+
+				case ELF<C>::SHT_GNU_VERDEF:
+				case ELF<C>::SHT_GNU_VERNEED:
+				case ELF<C>::SHT_GNU_VERSYM:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_VERSION, section.virt_addr(), section.size());
+					break;
+
+				case ELF<C>::SHT_INIT_ARRAY:
+				case ELF<C>::SHT_PREINIT_ARRAY:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_INIT, section.virt_addr(), section.size());
+					break;
+
+				case ELF<C>::SHT_FINI_ARRAY:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_FINI, section.virt_addr(), section.size());
+					break;
+
+				case ELF<C>::SHT_STRTAB:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_STRTAB, section.virt_addr(), section.size());
+					break;
+
+				case ELF<C>::SHT_DYNAMIC:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_DYNAMIC, section.virt_addr(), section.size());
+					break;
+
+				case ELF<C>::SHT_NOBITS:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_NOBITS, section.virt_addr(), section.size());
+					break;
+
 				case ELF<C>::SHT_SYMTAB:
 				case ELF<C>::SHT_DYNSYM:
+					section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELOC, section.virt_addr(), section.size());
 					for (const auto & sym: section.get_symbols()) {
 						switch (sym.section_index()) {
 							case ELF<C>::SHN_UNDEF:
@@ -229,11 +340,12 @@ class Analyze {
 	}
 
 	/*! \brief Mark symbols in relocation read-only section */
-	virtual void mark_relro() {
-		if (relro.first != 0 && relro.second != 0)
-			for (auto & sym : symbols)
-				if (sym.address >= relro.first && sym.address + sym.size < relro.first + relro.second)
-					sym.section.relro = true;
+	virtual void add_flags() {
+		for (auto & sym : symbols)
+			for (auto & section_flag : section_flags)
+				if (sym.address >= section_flag.start && sym.address + sym.size < section_flag.start + section_flag.size)
+					sym.section.flags |= section_flag.flag;
+
 	}
 
 	/*! \brief Additional read operation, arch depending */
@@ -271,14 +383,37 @@ class Analyze {
 						sym.refs.insert(rel.target);
 					}
 				}
+
 				// References
 				for (const auto ref : sym.refs) {
 					auto ref_sym = symbols.floor(ref);
 					if (ref_sym) {
+						// Special case: external symbols in GOT:
+						if (ref_sym->address == global_offset_table) {
+							// Special case for first three entries:
+							//  - got[0] is pointer to _DYNAMIC (and not used in Luci)
+							//  - got[1] is pointer to object (assigned in Luci)
+							//  - got[2] is resolve function (assigned in Luci)
+							if (ref - ref_sym->address < sizeof(void*) * 3) {
+								id_external.add<const char*>("GOT-Special");
+								id_external.add<uintptr_t>(ref - ref_sym->address);
+								continue;
+							}
+							// We know that there is no struct like access, hence we can directly hash the target.
+							auto rel = ref_sym->rels.find(ref);
+							if (rel != ref_sym->rels.end() && rel->undefined) {
+								id_external.add<uintptr_t>(rel->type);
+								id_external.add<const char*>(rel->name);
+								id_external.add<uintptr_t>(rel->addend);
+								continue;
+							}
+						}
+
 						// Hash ID and offset
 						id_external.add<uint64_t>(ref_sym->id.internal);
 						id_external.add<uint64_t>(ref - ref_sym->address);
 						ref_sym->deps.insert(sym.address);
+
 					} else {
 						// TODO
 					}
@@ -301,8 +436,8 @@ class Analyze {
 		// 2. Gather (additional) function start addresses by reading call-targets
 		find_additional_functions();
 
-		// 2.5: Mark relocation read only symbols
-		mark_relro();
+		// 2.5: Add symbols flags
+		add_flags();
 
 		// 3. Calculate position independent id
 		hash_internal();
