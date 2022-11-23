@@ -41,7 +41,9 @@ class AnalyzeX86 : public Analyze<C> {
 						auto sec = this->sections.floor(static_cast<uintptr_t>(rel.offset()));
 						assert(sec);
 						assert(sec->allocate());
-						assert(sec->writeable());
+						if (!sec->writeable())
+							cerr << "Warning: Relocation of type " << (int)rel.type() << " at " << (void*)rel.offset() << " in non-writeable section " << sec->name() << endl;
+
 						assert(!sec->executable());
 					}
 #endif
