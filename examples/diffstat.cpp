@@ -119,13 +119,21 @@ struct Diff {
 		});
 		cout << ',';
 		print_filter("data", 1, [](const Bean::Symbol & sym) {
-			return sym.section.writeable && sym.section.flags == Bean::Symbol::Section::SECTION_NONE;
+			return sym.section.writeable && sym.section.flags == Bean::Symbol::Section::SECTION_NONE && !Bean::TLS::is_tls(sym.address);
 		});
 		cout << ',';
 		print_filter("bss", 1, [](const Bean::Symbol & sym) {
-			return sym.section.writeable && sym.section.flags == Bean::Symbol::Section::SECTION_NOBITS;
+			return sym.section.writeable && sym.section.flags == Bean::Symbol::Section::SECTION_NOBITS && !Bean::TLS::is_tls(sym.address);
 		});
-		cout << '}' << endl;
+		cout << ',';
+		print_filter("tdata", 1, [](const Bean::Symbol & sym) {
+			return sym.section.writeable && sym.section.flags == Bean::Symbol::Section::SECTION_NONE && Bean::TLS::is_tls(sym.address);
+		});
+		cout << ',';
+		print_filter("tbss", 1, [](const Bean::Symbol & sym) {
+			return sym.section.writeable && sym.section.flags == Bean::Symbol::Section::SECTION_NOBITS && Bean::TLS::is_tls(sym.address);
+		});
+		cout << endl << '}' << endl;
 	}
 };
 
