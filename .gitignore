@@ -1,3 +1,4 @@
 .build*
 bean-*
 lib*.a
+__pycache__

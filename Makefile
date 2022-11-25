@@ -2,9 +2,12 @@ VERBOSE = @
 
 SRCFOLDER = src
 EXAMPLEDIR = examples
-EXAMPLEREFIX = bean-
+UTILPREFIX = bean-
 LIBNAME = bean
 LIBS := capstone dlh
+
+TOOLSDIR := tools
+TOOLS = $(wildcard $(TOOLSDIR)/*)
 
 INSTALLDIR ?= $(HOME)/.local/bin
 
@@ -39,8 +42,8 @@ BUILDFLAGS_dlh += CXXFLAGS="$(CXXFLAGS)"
 BUILDINFO = $(BUILDDIR)/.build_$(LIBNAME).o
 SOURCES = $(shell find $(SRCFOLDER)/ -name "*.cpp")
 OBJECTS = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.o)) $(BUILDINFO)
-EXAMPLES = $(patsubst $(EXAMPLEDIR)/%.cpp,$(EXAMPLEREFIX)%,$(wildcard $(EXAMPLEDIR)/*.cpp))
-DEPFILES = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.d)) $(patsubst $(EXAMPLEDIR)/%.cpp,$(BUILDDIR)/$(EXAMPLEREFIX)%.d,$(wildcard $(EXAMPLEDIR)/*.cpp))
+EXAMPLES = $(patsubst $(EXAMPLEDIR)/%.cpp,$(UTILPREFIX)%,$(wildcard $(EXAMPLEDIR)/*.cpp))
+DEPFILES = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.d)) $(patsubst $(EXAMPLEDIR)/%.cpp,$(BUILDDIR)/$(UTILPREFIX)%.d,$(wildcard $(EXAMPLEDIR)/*.cpp))
 TARGET = lib$(LIBNAME).a
 
 LDFLAGS = -L$(LIBDIR) -l$(LIBNAME) $(foreach LIB,$(LIBS),-l$(LIB)) -Wl,--gc-sections
@@ -54,9 +57,9 @@ $(BUILDDIR)/%.d: $(SRCFOLDER)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 	@echo "DEP		$<"
 	$(VERBOSE) $(CXX) $(CXXFLAGS) -MM -MP -MT $(BUILDDIR)/$*.o -MF $@ $<
 
-$(BUILDDIR)/$(EXAMPLEREFIX)%.d: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
+$(BUILDDIR)/$(UTILPREFIX)%.d: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 	@echo "DEP		$<"
-	$(VERBOSE) $(CXX) $(CXXFLAGS) -MM -MP -MT $(EXAMPLEREFIX)$* -MF $@ $<
+	$(VERBOSE) $(CXX) $(CXXFLAGS) -MM -MP -MT $(UTILPREFIX)$* -MF $@ $<
 
 $(BUILDDIR)/%.o: $(SRCFOLDER)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 	@echo "CXX		$<"
@@ -83,7 +86,7 @@ $(TARGET): $(LIBDIR)/$(TARGET) $(EXTLIBS) | $(MAKEFILE_LIST)
 	@rm -f $@
 	$(VERBOSE) echo 'create $@\n$(foreach FILE,$(LIBDIR)/$(TARGET) $(EXTLIBS),addlib $(FILE)\n)save\nend\n' | ar -M
 
-$(EXAMPLEREFIX)%: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) $(TARGET) $(EXTLIBS) |
+$(UTILPREFIX)%: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) $(TARGET) $(EXTLIBS) |
 	@echo "CXX		$@"
 	$(VERBOSE) $(CXX) $(CXXFLAGS) -static -o $@ $< $(LDFLAGS)
 
@@ -92,6 +95,7 @@ examples: $(EXAMPLES)
 
 install: $(EXAMPLES)
 	$(VERBOSE) install -Dm755 $^ $(INSTALLDIR)
+	$(VERBOSE) $(foreach TOOL,$(TOOLS),ln -f -s $(realpath $(TOOL)) $(INSTALLDIR)/$(UTILPREFIX)$(basename $(notdir $(TOOL))) ; )
 	$(VERBOSE) if ! echo "$(PATH)" | grep "$(INSTALLDIR)" >/dev/null 2>&1 ; then \
 		echo "You have to add '$(INSTALLDIR)' to PATH!" ; \
 	fi
