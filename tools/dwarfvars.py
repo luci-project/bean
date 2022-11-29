@@ -5,14 +5,20 @@ import os
 import sys
 import errno
 import regex
+import shutil
 import xxhash
 import argparse
 import subprocess
-from libdebuginfod import DebugInfoD
+from pathlib import Path
 
 # TODO: Use pyelftools instead
 
 def get_debugbin(filepath, root = '', buildid = None, debuginfod = True):
+	if root:
+		root_dir = Path(root).absolute()
+		root = str(root_dir)
+		filepath = '/' + str(Path(filepath).relative_to(root_dir))
+
 	dbgsyms = []
 	ids = []
 	if buildid:
@@ -25,29 +31,32 @@ def get_debugbin(filepath, root = '', buildid = None, debuginfod = True):
 		while line := readelf.stdout.readline().decode('utf-8'):
 			if buildid := buildids.match(line):
 				dbgsyms.append(root + '/usr/lib/debug/.build-id/' + buildid.group(1)[:2] + '/' + buildid.group(1)[2:] + '.debug')
-				ids.append( buildid.group(1))
+				ids.append(buildid.group(1))
 
 	dbgsyms.append(root + filepath + '.debug')
 	dbgsyms.append(root + os.path.dirname(filepath) + '/.debug/' + os.path.basename(filepath) + '.debug')
 	dbgsyms.append(root + '/usr/lib/debug' + filepath + '.debug')
+	# non conforming
+	dbgsyms.append(root + os.path.dirname(filepath) + '/.debug/' + os.path.basename(filepath))
+	dbgsyms.append(root + '/usr/lib/debug' + filepath)
 
 	for dbgsym in dbgsyms:
 		if os.path.exists(dbgsym):
 			return dbgsym
 
 	if debuginfod:
-		try:
-			session = DebugInfoD()
-			session.begin()
+		for service in [ 'https://debuginfod.debian.net', 'https://debuginfod.ubuntu.com' ]:
 			for id in ids:
-				fd, path = session.find_debuginfo(id)
-				if path:
-					session.end()
-					os.close(fd)
-					return path
-			session.end()
-		except:
-			return None
+				try:
+					with urllib.request.urlopen(f'{service}/buildid/{id}/debuginfo') as fp:
+						target = Path(f'{root}/usr/lib/debug/.build-id/{id[:2]}/{id[2:]}.debug')
+						target.parent.mkdir(parents=True, exist_ok=True)
+						with open(target,'wb') as output:
+							shutil.copyfileobj(fp, output)
+						print("got {target}")
+						return str(target)
+				except:
+					continue
 
 	return None
 
@@ -56,6 +65,7 @@ class DwarfVars:
 		self.DIEs = []
 		self.aliases = aliases
 		self.names = names
+		self.incomplete = False
 		self.file = os.path.realpath(file)
 		self.root = root
 		if not os.path.exists(self.file):
@@ -83,6 +93,7 @@ class DwarfVars:
 		level = 0
 		last = 0
 		unit = 0
+		skip = True
 		dwarfdump = subprocess.Popen(['dwarfdump', '-i', '-e', '-d', file], stdout=subprocess.PIPE)
 		while line := dwarfdump.stdout.readline().decode('utf-8'):
 			if entry := entries.match(line):
@@ -93,10 +104,13 @@ class DwarfVars:
 				DIE['children'] = []
 
 				if entry.group(3) == 'compile_unit':
-					assert(entry.group(1) == '0')
 					DIE['parent'] = ID
 					self.DIEs.append({})
 					unit = len(self.DIEs) - 1
+					skip = False
+				elif skip or entry.group(3) == 'partial_unit':
+					skip = True
+					continue
 				else:
 					# Nesting level
 					l = int(entry.group(1))
@@ -140,6 +154,18 @@ class DwarfVars:
 				DIE['unit'] = unit
 				self.DIEs[unit][ID] = DIE
 		return len(self.DIEs) > 0
+
+	def get_die(self, unit, type):
+		if unit >= len(self.DIEs):
+			print(f"Unit {unit} not found -- got only {len(self.DIEs)} units", file=sys.stderr)
+			self.incomplete = True
+			return None
+		elif not type in self.DIEs[unit]:
+			print(f"Type {type} not found in unit {unit}", file=sys.stderr)
+			self.incomplete = True
+			return None
+		else:
+			return self.DIEs[unit][type]
 
 	def get_type(self, DIE, resolve_members = True):
 		if not resolve_members and 'children' in DIE:
@@ -218,10 +244,14 @@ class DwarfVars:
 				id += '}'
 
 			if 'type' in DIE:
-				type_id, type_size, type_hash = self.get_type(self.DIEs[DIE['unit']][DIE['type']], resolve_members)
-				id += '(' + type_id + ')' if len(id) > 0 else type_id
-				size = type_size
-				hash.update('#' + type_hash)
+				type_DIE = self.get_die(DIE['unit'], DIE['type'])
+				if type_DIE:
+					type_id, type_size, type_hash = self.get_type(type_DIE, resolve_members)
+					id += '(' + type_id + ')' if len(id) > 0 else type_id
+					size = type_size
+					hash.update('#' + type_hash)
+				else:
+					type_hash = ''
 
 			if DIE['tag'] == 'pointer_type':
 				id += '*'
@@ -306,9 +336,11 @@ class DwarfVars:
 			cdef += '}'
 
 		if 'type' in DIE and (DIE['tag'] != 'typedef' or self.aliases):
-			type_cdef, type_size, factor = self.get_def(self.DIEs[DIE['unit']][DIE['type']], resolve_members, skip_const)
-			cdef += type_cdef
-			size = type_size
+			def_DIE = self.get_die(DIE['unit'], DIE['type'])
+			if def_DIE:
+				type_cdef, type_size, factor = self.get_def(def_DIE, resolve_members, skip_const)
+				cdef += type_cdef
+				size = type_size
 
 		if DIE['tag'] == 'pointer_type':
 			if not 'type' in DIE or len(cdef) == 0:
@@ -349,17 +381,19 @@ class DwarfVars:
 				if DIE['tag'] == 'variable' and 'location' in DIE and 'type' in DIE:
 					if loc := locaddr.match(DIE['location']):
 						addr = int(loc.group(1), 0)
-						typename, size, hash = self.get_type(self.DIEs[DIE['unit']][DIE['type']])
-						variables.append({
-							'name': DIE['name'],
-							'value': addr,
-							'type': typename,
-							'unit': DIE['unit'],
-							'size': size,
-							'external': True if 'external' in DIE and DIE['external'][:3] == 'yes' else False,
-							'hash': hash,
-							'source': DIE['decl'] if 'decl' in DIE else ''
-						})
+						type_DIE = self.get_die(DIE['unit'], DIE['type'])
+						if type_DIE:
+							typename, size, hash = self.get_type(type_DIE)
+							variables.append({
+								'name': DIE['name'],
+								'value': addr,
+								'type': typename,
+								'unit': DIE['unit'],
+								'size': size,
+								'external': True if 'external' in DIE and DIE['external'][:3] == 'yes' else False,
+								'hash': hash,
+								'source': DIE['decl'] if 'decl' in DIE else ''
+							})
 		return variables
 
 

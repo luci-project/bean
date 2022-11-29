@@ -112,10 +112,13 @@ class ElfVar:
 		# Get build ID
 		self.buildid = None
 		for section in self.elf.iter_sections():
-			if isinstance(section, NoteSection):
+			if self.buildid:
+				break
+			elif isinstance(section, NoteSection):
 				for note in section.iter_notes():
-					if note['n_type'] == 'NT_GNU_BUILD_ID':
+					if note['n_type'] == 'NT_GNU_BUILD_ID' and note['n_size'] == 36:
 						self.buildid = note['n_desc']
+						break
 
 		# Get debug symbols
 		if self.elf.has_dwarf_info() and next(self.elf.get_dwarf_info().iter_CUs(), False):
@@ -125,7 +128,7 @@ class ElfVar:
 		else:
 			self.dbgsym = None
 
-		if dbgsym:
+		if self.dbgsym:
 			self.dwarf = DwarfVars(self.dbgsym, aliases = aliases, names = names)
 
 
@@ -211,8 +214,8 @@ if __name__ == '__main__':
 						raise RuntimeError(f"Size mismatch for {s['name']}: {d['size']} vs {s['size']}")
 					if d['category'] != s['category']:
 						raise RuntimeError(f"category mismatch for {s['name']}: {d['category']} vs {s['category']}")
-					if d['external'] != s['external']:
-						raise RuntimeError(f"External mismatch for {s['name']}")
+#					if d['external'] != s['external']:
+#						raise RuntimeError(f"External mismatch for {s['name']}")
 					v = s
 					for key in [ 'type', 'hash', 'source' ]:
 						v[key] = d[key]
@@ -241,6 +244,7 @@ if __name__ == '__main__':
 		}
 		if elf.dbgsym:
 			files[f.name]["debug"] = os.path.realpath(elf.dbgsym).lstrip(args.root)
+			files[f.name]["debug-incomplete"] = elf.dwarf and elf.dwarf.incomplete
 
 		for cat in sorted(elf.categories):
 			if args.writable and not 'W' in cat and cat != 'TLS':
