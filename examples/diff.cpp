@@ -69,6 +69,10 @@ int main(int argc, const char *argv[]) {
 				n.dump(cout, Bean::VERBOSE, &new_file.bean.symbols, "\e[0m ");
 			}
 		}
+		while (rnext != removed.end()) {
+			rnext->dump(cout, verbose, &old_file.bean.symbols, "\e[0;31m-");
+			++rnext;
+		}
 		cout << "\e[0m";
 	}
 
