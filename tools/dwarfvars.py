@@ -53,7 +53,6 @@ def get_debugbin(filepath, root = '', buildid = None, debuginfod = True):
 						target.parent.mkdir(parents=True, exist_ok=True)
 						with open(target,'wb') as output:
 							shutil.copyfileobj(fp, output)
-						print("got {target}")
 						return str(target)
 				except:
 					continue

@@ -2,14 +2,19 @@
 # -*- coding: utf-8 -*-
 
 import os
+import re
 import io
 import sys
 import json
 import errno
+import types
+import shelve
+import socket
 import xxhash
 import os.path
 import argparse
 import functools
+import selectors
 
 from dwarfvars import get_debugbin, DwarfVars
 
@@ -58,7 +63,7 @@ def sortuniq_datatypes(datatypelist):
 			yield s
 
 class ElfVar:
-	def __init__(self, file, root='', dbgsym = True, dbgsym_extern = True, aliases = True, names = True):
+	def __init__(self, file, root=''):
 		# Find ELF file
 		if isinstance(file, str):
 			if os.path.exists(file):
@@ -67,12 +72,15 @@ class ElfVar:
 				self.path = os.path.realpath(root + '/' + file)
 			else:
 				raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), file)
-			self.elf = ELFFile(open(self.path, "rb"))
+			self.file = open(self.path, "rb")
 		elif isinstance(file, io.BufferedReader):
 			self.path = os.path.realpath(file.name)
-			self.elf = ELFFile(file)
+			self.file = file
 		else:
 			raise TypeError(f"File has invalid type {type(file)}")
+		self.root = root
+		self.elf = ELFFile(self.file)
+		self.dbgsym = None
 
 		# Parse segments
 		self.segments = []
@@ -80,34 +88,6 @@ class ElfVar:
 		self.sec2seg = {}
 		self.relro = None
 		self.dwarf = None
-		for segment in self.elf.iter_segments():
-			if segment['p_type'] in [ 'PT_LOAD', 'PT_TLS', 'PT_GNU_RELRO' ]:
-				cat = ''
-				if segment['p_flags'] & P_FLAGS.PF_R != 0:
-					cat += 'R'
-				if segment['p_flags'] & P_FLAGS.PF_W != 0:
-					cat += 'W'
-				if segment['p_flags'] & P_FLAGS.PF_X != 0:
-					cat += 'X'
-				if segment['p_type'] == 'PT_TLS':
-					cat = 'TLS'
-				self.categories.add(cat)
-
-				data = {
-					'category': cat,
-					'value': segment['p_vaddr'],
-					'size': segment['p_memsz']
-				}
-
-				if segment['p_type'] == 'PT_GNU_RELRO':
-					self.relro = data
-				else:
-					self.segments.append(data)
-					segidx = len(self.segments) - 1
-
-					for s in range(self.elf.num_sections()):
-						if segment.section_in_segment(self.elf.get_section(s)):
-							self.sec2seg[s] = segidx
 
 		# Get build ID
 		self.buildid = None
@@ -120,17 +100,46 @@ class ElfVar:
 						self.buildid = note['n_desc']
 						break
 
-		# Get debug symbols
+	def load_debug_symbols(self, extern = True, aliases = True, names = True):
 		if self.elf.has_dwarf_info() and next(self.elf.get_dwarf_info().iter_CUs(), False):
 			self.dbgsym = self.path
-		elif dbgsym_extern:
-			self.dbgsym = get_debugbin(self.path, root, self.buildid)
-		else:
-			self.dbgsym = None
+		elif extern:
+			self.dbgsym = get_debugbin(self.path, self.root, self.buildid)
 
 		if self.dbgsym:
 			self.dwarf = DwarfVars(self.dbgsym, aliases = aliases, names = names)
 
+
+	def load_segments(self):
+		if len(self.segments) == 0:
+			for segment in self.elf.iter_segments():
+				if segment['p_type'] in [ 'PT_LOAD', 'PT_TLS', 'PT_GNU_RELRO' ]:
+					cat = ''
+					if segment['p_flags'] & P_FLAGS.PF_R != 0:
+						cat += 'R'
+					if segment['p_flags'] & P_FLAGS.PF_W != 0:
+						cat += 'W'
+					if segment['p_flags'] & P_FLAGS.PF_X != 0:
+						cat += 'X'
+					if segment['p_type'] == 'PT_TLS':
+						cat = 'TLS'
+					self.categories.add(cat)
+
+					data = {
+						'category': cat,
+						'value': segment['p_vaddr'],
+						'size': segment['p_memsz']
+					}
+
+					if segment['p_type'] == 'PT_GNU_RELRO':
+						self.relro = data
+					else:
+						self.segments.append(data)
+						segidx = len(self.segments) - 1
+
+						for s in range(self.elf.num_sections()):
+							if segment.section_in_segment(self.elf.get_section(s)):
+								self.sec2seg[s] = segidx
 
 	def symbols(self):
 		symbols = []
@@ -175,30 +184,12 @@ class ElfVar:
 
 		return dwarfsyms
 
-
-if __name__ == '__main__':
-	# Arguments
-	parser = argparse.ArgumentParser(prog='PROG')
-	parser.add_argument('-a', '--aliases', action='store_true', help='Include aliases (typedefs)')
-	parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
-	parser.add_argument('-d', '--dbgsym', action='store_true', help='use debug symbols')
-	parser.add_argument('-D', '--dbgsym_extern', action='store_true', help='use external debug symbols (implies -d)')
-	parser.add_argument('-r', '--root', help='Path prefix for debug symbol files', default='')
-	parser.add_argument('-t', '--datatypes', action='store_true', help='Hash datatypes (requires debug symbols)')
-	parser.add_argument('-w', '--writable', action='store_true', help='Ignore non-writable sections')
-	parser.add_argument('-i', '--identical', action='store_true', help='Check if hashes of input files are identical')
-	parser.add_argument('-n', '--names', action='store_true', help='Include names (complex types / members)')
-	parser.add_argument('file', type=argparse.FileType('rb'), help="ELF file with debug information", nargs='+')
-	args = parser.parse_args()
-
-	files = {}
-	for f in args.file:
-		elf = ElfVar(f, args.root, args.dbgsym, args.dbgsym_extern, args.aliases, args.names)
-		symbols = elf.symbols()
+	def summary(self, datatypes = True, writable_only = False, names = True, verbose = False):
+		symbols = self.symbols()
 		variables = []
-		if args.dbgsym and elf.dwarf:
+		if self.dbgsym and self.dwarf:
 			si = sortuniq_symbols(symbols)
-			di = sortuniq_symbols(elf.symbols_debug())
+			di = sortuniq_symbols(self.symbols_debug())
 
 			s = next(si, None)
 			d = next(di, None)
@@ -236,39 +227,37 @@ if __name__ == '__main__':
 		else:
 			variables = list(sortuniq_symbols(symbols))
 
-
-		files[f.name] = {
-			"file": os.path.realpath(f.name).lstrip(args.root),
-			"buildid": elf.buildid,
+		info = {
+			"file": os.path.realpath(self.file.name).lstrip(self.root),
+			"buildid": self.buildid,
 			"variables": len(variables)
 		}
-		if elf.dbgsym:
-			files[f.name]["debug"] = os.path.realpath(elf.dbgsym).lstrip(args.root)
-			files[f.name]["debug-incomplete"] = elf.dwarf and elf.dwarf.incomplete
+		if self.dbgsym and self.dwarf:
+			info["debug"] = os.path.realpath(self.dbgsym).lstrip(self.root)
+			info["debug-incomplete"] = self.dwarf and self.dwarf.incomplete
 
-		for cat in sorted(elf.categories):
-			if args.writable and not 'W' in cat and cat != 'TLS':
+		for cat in sorted(self.categories):
+			if writable_only and not 'W' in cat and cat != 'TLS':
 				continue
 
 			hash = xxhash.xxh64()
-			files[f.name][cat] = {}
-			if args.verbose:
-				files[f.name][cat]["details"] = []
+			info[cat] = {}
+			if verbose:
+				info[cat]["details"] = []
 			vars = filter(lambda x: x['category'] == cat, variables)
 			for var in vars:
-				if args.verbose:
-					files[f.name][cat]["details"].append(str(var))
-				if args.names:
+				if verbose:
+					info[cat]["details"].append(str(var))
+				if names:
 					hash.update(var['name'])
 				if 'hash' in var:
 					hash.update('#' + var['hash'])
 				hash.update('@' + str(var['value']) + '/' + str(var['align']) + ':' + str(var['size']))
-			files[f.name][cat]["hash"] = hash.hexdigest()
+			info[cat]["hash"] = hash.hexdigest()
 
-
-		if args.datatypes and elf.dwarf:
+		if datatypes and self.dwarf:
 			datatypes = []
-			for id, size, hash in elf.dwarf.iter_types():
+			for id, size, hash in self.dwarf.iter_types():
 				if size > 0:
 					datatypes.append({
 						"type": id,
@@ -280,14 +269,135 @@ if __name__ == '__main__':
 				datatypes.sort(key = lambda x: x['type'])
 				hash = xxhash.xxh64()
 
-				files[f.name]["datatypes"] = {}
-				if args.verbose:
-					files[f.name]["datatypes"]["details"] = []
+				info["datatypes"] = {}
+				if verbose:
+					info["datatypes"]["details"] = []
 				for t in sortuniq_datatypes(datatypes):
-					if args.verbose:
-						files[f.name]["datatypes"]["details"].append(str(t))
+					if verbose:
+						info["datatypes"]["details"].append(str(t))
 					hash.update(t['hash'])
-				files[f.name]["datatypes"]["hash"] = hash.hexdigest()
+				info["datatypes"]["hash"] = hash.hexdigest()
 
+		return info
+
+
+def get_data(file, args, cache):
+	try:
+		elf = ElfVar(file, args.root)
+		key = f"{elf.buildid},{args.root},{args.dbgsym},{args.dbgsym_extern},{args.verbose},{args.aliases},{args.names},{args.datatypes},{args.writable}"
+		if args.cache and key in cache:
+			return cache[key]
+		else:
+			elf.load_segments()
+			if args.dbgsym:
+				elf.load_debug_symbols(args.dbgsym_extern, args.aliases, args.names)
+			result = elf.summary(args.datatypes, args.writable, args.names, args.verbose)
+			if args.cache:
+				cache[key] = result
+			return result
+	except Exception as e:
+		print(f"Error on {file}: {str(e)}", file=sys.stderr)
+		return None
+
+def simplify(data):
+	if data:
+		return ','.join([ f"{k}:{v['hash']}" for k,v in data.items() if type(v) is dict and 'hash' in v ]) + "\n"
+	else:
+		return "-\n"
+
+def listen_socket(socket, args, cache):
+	socket.listen()
+	socket.setblocking(False)
+	sel = selectors.DefaultSelector()
+	sel.register(socket, selectors.EVENT_READ, data=None)
+	try:
+		while True:
+			events = sel.select(timeout=None)
+			for key, mask in events:
+				if key.data is None:
+					conn, addr = key.fileobj.accept()
+					print(f"Accepted connection from {addr}", file=sys.stderr)
+					conn.setblocking(False)
+					data = types.SimpleNamespace(addr=addr, inb=b"", outb=b"")
+					events = selectors.EVENT_READ | selectors.EVENT_WRITE
+					sel.register(conn, events, data=data)
+				else:
+					data = key.data
+					if mask & selectors.EVENT_READ:
+						recv_data = key.fileobj.recv(4096)
+						if recv_data:
+							key.data.inb += recv_data.replace(b'\r', b'\n').replace(b'\x00', b'\n')
+							while b'\n' in key.data.inb:
+								p = key.data.inb.split(b'\n', maxsplit=1)
+								request = p[0].decode('ascii')
+								print(f"Got request for {request} from {data.addr}")
+								result = get_data(request, args, cache)
+								key.data.outb += bytes(simplify(result) if args.plain else json.dumps(result), 'ascii')
+								key.data.inb = p[1] if len(p) > 1 else None
+						else:
+							print(f"Closing connection to {data.addr}")
+							sel.unregister(key.fileobj)
+							key.fileobj.close()
+					if mask & selectors.EVENT_WRITE:
+						if key.data.outb:
+							print(f"Replying {len(key.data.outb)} bytes to {data.addr}")
+							sent = key.fileobj.send(key.data.outb)  # Should be ready to write
+							key.data.outb = key.data.outb[sent:]
+
+	except KeyboardInterrupt:
+		print("Caught keyboard interrupt, exiting", file=sys.stderr)
+	finally:
+		sel.close()
+
+if __name__ == '__main__':
+	# Arguments
+	parser = argparse.ArgumentParser(prog='PROG')
+	parser.add_argument('-a', '--aliases', action='store_true', help='Include aliases (typedefs)')
+	parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
+	parser.add_argument('-d', '--dbgsym', action='store_true', help='use debug symbols')
+	parser.add_argument('-D', '--dbgsym_extern', action='store_true', help='use external debug symbols (implies -d)')
+	parser.add_argument('-r', '--root', help='Path prefix for debug symbol files', default='')
+	parser.add_argument('-t', '--datatypes', action='store_true', help='Hash datatypes (requires debug symbols)')
+	parser.add_argument('-w', '--writable', action='store_true', help='Ignore non-writable sections')
+	parser.add_argument('-i', '--identical', action='store_true', help='Check if hashes of input files are identical')
+	parser.add_argument('-n', '--names', action='store_true', help='Include names (complex types / members)')
+	parser.add_argument('-p', '--plain', action='store_true', help='output a simple plain string containing the hashes (instead of json)')
+	parser.add_argument('-c', '--cache', help='Use cache file (prefix)', default=None)
+	parser.add_argument('-s', '--socket', help='Act as server on socket (unix domain socket if file, tcp socket if Host/IP(v4):Port)', default=None)
+	parser.add_argument('file', type=argparse.FileType('rb'), help="ELF file with debug information", nargs='*')
+	args = parser.parse_args()
+
+	cache = shelve.open(args.cache) if args.cache else None
+
+	if args.file:
+		files = []
+		for file in args.file:
+			result = get_data(file, args, cache)
+			if args.plain:
+				print(simplify(result))
+			else:
+				files.append(result)
+		if len(files) > 0:
+			print(json.dumps(files, indent=4))
 		# TODO: Compare if multiple files
-		print(json.dumps(files[f.name], indent=4))
+
+	if args.socket:
+		inet = re.search(r'^[ ]*((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|(?:(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*(?:[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])):([0-9]{1,5})[ ]*$', args.socket)
+		if inet:
+			with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+				s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+				s.bind((inet.group(1), int(inet.group(2))))
+				print(f'Listening at port {inet.group(2)} on host {inet.group(1)}', file=sys.stderr)
+				listen_socket(s, args, cache)
+		else:
+			if os.path.exists(args.socket):
+				print(f'Error: socket file {args.socket} already exists', file=sys.stderr)
+			else:
+				with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+					s.bind((args.socket))
+					print(f'Listening at unix domain socket at {args.socket}', file=sys.stderr)
+					listen_socket(s, args, cache)
+				os.remove(args.socket)
+
+	if args.cache:
+		cache.close()
