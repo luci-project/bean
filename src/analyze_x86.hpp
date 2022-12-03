@@ -585,8 +585,9 @@ class AnalyzeX86 : public Analyze<C> {
 
 
 				// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
-				if (sym.section.writeable && (sym.section.flags & Bean::Symbol::Section::SECTION_RELRO) == 0)
+				if (sym.section.writeable && (sym.section.flags & Bean::Symbol::Section::SECTION_RELRO) == 0) {
 					id_internal.add<uint32_t>(address % this->page_size);
+				}
 
 				// Non-executable objects will be fully hashed
 				if (is_bss) {

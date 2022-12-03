@@ -280,11 +280,13 @@ class ElfVar:
 
 		return info
 
+def get_cache_key(buildid, args):
+	return f"{buildid},{args.dbgsym},{args.dbgsym_extern},{args.verbose},{args.aliases},{args.names},{args.datatypes},{args.writable}"
 
 def get_data(file, args, cache):
 	try:
 		elf = ElfVar(file, args.root)
-		key = f"{elf.buildid},{args.root},{args.dbgsym},{args.dbgsym_extern},{args.verbose},{args.aliases},{args.names},{args.datatypes},{args.writable}"
+		key = get_cache_key(elf.buildid, args)
 		if args.cache and key in cache:
 			return cache[key]
 		else:
@@ -310,6 +312,7 @@ def listen_socket(socket, args, cache):
 	socket.setblocking(False)
 	sel = selectors.DefaultSelector()
 	sel.register(socket, selectors.EVENT_READ, data=None)
+	buildid = re.compile(r'^[ ]*([0-9a-f]{40})[ ]*$')
 	try:
 		while True:
 			events = sel.select(timeout=None)
@@ -331,7 +334,12 @@ def listen_socket(socket, args, cache):
 								p = key.data.inb.split(b'\n', maxsplit=1)
 								request = p[0].decode('ascii')
 								print(f"Got request for {request} from {data.addr}")
-								result = get_data(request, args, cache)
+								b = buildid.match(request)
+								if b:
+									key = get_cache_key(b.group(1), args)
+									result = cache[key] if args.cache and key in cache else None
+								else:
+									result = get_data(request, args, cache)
 								key.data.outb += bytes(simplify(result) if args.plain else json.dumps(result), 'ascii')
 								key.data.inb = p[1] if len(p) > 1 else None
 						else:

@@ -142,8 +142,12 @@ class Analyze {
 					break;
 
 				case ELF<C>::PT_LOAD:
+					// TODO: Required if we would handle 2 MB (huge pages)
+					// However, we currently just act as if they were 4K
+					/*
 					if (page_size < segment.alignment())
 						page_size = segment.alignment();
+					*/
 					segments.insert(segment);
 					if (segment.size() < segment.virt_size()) {
 						insert_symbol(segment.virt_addr() + segment.size(), 0, nullptr, nullptr, segment.writeable(), segment.executable());
