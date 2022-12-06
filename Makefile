@@ -7,7 +7,7 @@ LIBNAME = bean
 LIBS := capstone dlh
 
 TOOLSDIR := tools
-TOOLS = $(wildcard $(TOOLSDIR)/*)
+TOOLS = $(filter-out __pycache__,$(wildcard $(TOOLSDIR)/*))
 
 INSTALLDIR ?= $(HOME)/.local/bin
 
