@@ -70,6 +70,7 @@ class Analyze {
 #endif
 	  symbols(symbols), elf(elf), dbgsym(dbgsym), resolve_internal_relocations(resolve_internal_relocations) {
 		assert(elf.header.valid());
+		(void) debug;
 #ifdef BEAN_VERBOSE
 		if (debug)
 			assert(debug_buffer != nullptr);
