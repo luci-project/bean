@@ -6,7 +6,16 @@
 int main(int argc, const char *argv[]) {
 	// Check arguments
 	if (argc < 2) {
-		cerr << "Usage: " << argv[0] << " [-r] [-s] [-v[v[v]]] ELF-FILES" << endl;
+		cerr << "Hash ELF binary" << endl << endl
+		     << "   Usage: " << argv[0] << " [-d] [-s] [-r] [-v[v[v]]] ELF-FILE[S]"<< endl << endl
+		     << "Parameters:" << endl
+		     << "  -d    include dependencies" << endl
+		     << "  -s    use (external) debug symbols" << endl
+		     << "        environment variabl DEBUG_ROOT can be used to specify the base directory" << endl
+		     << "  -r    resolve (internal) relocations" << endl
+		     << "  -v    list address and names" << endl
+		     << "  -vv   ... and dissassemble code" << endl
+		     << "  -vvv  ... and show all references and relocations" << endl;
 		return EXIT_FAILURE;
 	}
 
@@ -14,9 +23,12 @@ int main(int argc, const char *argv[]) {
 	bool reloc = false;
 	bool dbgsym = false;
 	bool explain = false;
+	bool dependencies = false;
 
 	for (int i = 1; i < argc; i++) {
-		if (String::compare(argv[i], "-r") == 0) {
+		if (String::compare(argv[i], "-d") == 0) {
+			dependencies = true;
+		} else if (String::compare(argv[i], "-r") == 0) {
 			reloc = true;
 		} else if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
@@ -33,7 +45,7 @@ int main(int argc, const char *argv[]) {
 			cerr << "Unsupported parameter '" << argv[i] << endl;
 			return EXIT_FAILURE;
 		} else {
-			BeanFile file(argv[i], dbgsym, reloc, verbose >= Bean::DEBUG);
+			BeanFile file(argv[i], dbgsym, reloc, dependencies);
 			cout << "# " << file.binary.path << " (" << file.binary.size << " bytes):" << endl;
 			file.bean.dump(cout, verbose);
 			cout << endl;

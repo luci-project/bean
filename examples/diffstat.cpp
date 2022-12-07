@@ -166,7 +166,13 @@ int main(int argc, const char *argv[]) {
 	}
 
 	if (new_path == nullptr) {
-		cerr << "Usage: " << argv[0] << " [-d] [-s] [-r] A B" << endl;
+		cerr << "Summary of differences between two ELF binaries A and B" << endl << endl
+		     << "   Usage: " << argv[0] << " [-d] [-s] [-r] A B" << endl << endl
+		     << "Parameters:" << endl
+		     << "  -d   include dependencies" << endl
+		     << "  -s    use (external) debug symbols" << endl
+		     << "        environment variabl DEBUG_ROOT can be used to specify the base directory" << endl
+		     << "  -r    resolve (internal) relocations" << endl;
 		return EXIT_FAILURE;
 	}
 

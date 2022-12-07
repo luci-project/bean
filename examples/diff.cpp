@@ -15,7 +15,7 @@ int main(int argc, const char *argv[]) {
 	BeanFile * b = nullptr;
 
 	for (int i = 1; i < argc; i++) {
-		if (!String::compare(argv[i], "-d")) {
+		if (String::compare(argv[i], "-d") == 0) {
 			dependencies = true;
 		} else if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
@@ -43,7 +43,16 @@ int main(int argc, const char *argv[]) {
 	}
 
 	if (new_path == nullptr) {
-		cerr << "Usage: " << argv[0] << " [-d] [-s] [-r] [-v[v]] OLD NEW" << endl;
+		cerr << "Compare ELF binaries A and B" << endl << endl
+		     << "   Usage: " << argv[0] << " [-d] [-s] [-r] [-v[v]] OLD NEW" << endl << endl
+		     << "Parameters:" << endl
+		     << "  -d    include dependencies" << endl
+		     << "  -s    use (external) debug symbols" << endl
+		     << "        environment variabl DEBUG_ROOT can be used to specify the base directory" << endl
+		     << "  -r    resolve (internal) relocations" << endl
+		     << "  -v    list address and names" << endl
+		     << "  -vv   ... and dissassemble code" << endl
+		     << "  -vvv  ... and show all references and relocations" << endl;
 		return EXIT_FAILURE;
 	}
 
