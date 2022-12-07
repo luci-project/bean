@@ -161,7 +161,7 @@ for o in sorted_objs:
 					for section, data in result.items():
 						if section == "patchable":
 							if data and hashsuccess:
-								t ="update"
+								t = "update"
 								c = "green"
 							else:
 								t = "restart"

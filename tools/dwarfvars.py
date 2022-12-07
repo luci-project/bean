@@ -248,7 +248,9 @@ class DwarfVars:
 					type_id, type_size, type_hash = self.get_type(type_DIE, resolve_members)
 					id += '(' + type_id + ')' if len(id) > 0 else type_id
 					size = type_size
-					hash.update('#' + type_hash)
+					# TODO with partial unit type_hash might be random
+					if size != 0 or len(type_id) != 0:
+						hash.update('#' + type_hash)
 				else:
 					type_hash = ''
 
