@@ -313,49 +313,54 @@ def listen_socket(socket, args, cache):
 	sel = selectors.DefaultSelector()
 	sel.register(socket, selectors.EVENT_READ, data=None)
 	buildid = re.compile(r'^[ ]*([0-9a-f]{40})[ ]*$')
-	try:
-		while True:
+	while True:
+		try:
 			events = sel.select(timeout=None)
-			for key, mask in events:
-				if key.data is None:
-					conn, addr = key.fileobj.accept()
+			for event, mask in events:
+				if event.data is None:
+					conn, addr = event.fileobj.accept()
 					print(f"Accepted connection from {addr}", file=sys.stderr)
 					conn.setblocking(False)
 					data = types.SimpleNamespace(addr=addr, inb=b"", outb=b"")
 					events = selectors.EVENT_READ | selectors.EVENT_WRITE
 					sel.register(conn, events, data=data)
 				else:
-					data = key.data
+					data = event.data
 					if mask & selectors.EVENT_READ:
-						recv_data = key.fileobj.recv(4096)
+						recv_data = event.fileobj.recv(4096)
 						if recv_data:
-							key.data.inb += recv_data.replace(b'\r', b'\n').replace(b'\x00', b'\n')
-							while b'\n' in key.data.inb:
-								p = key.data.inb.split(b'\n', maxsplit=1)
+							event.data.inb += recv_data.replace(b'\r', b'\n').replace(b'\x00', b'\n')
+							while b'\n' in event.data.inb:
+								p = event.data.inb.split(b'\n', maxsplit=1)
 								request = p[0].decode('ascii')
-								print(f"Got request for {request} from {data.addr}")
+								print(f"Request from {data.addr} for {request}")
 								b = buildid.match(request)
 								if b:
 									key = get_cache_key(b.group(1), args)
 									result = cache[key] if args.cache and key in cache else None
 								else:
 									result = get_data(request, args, cache)
-								key.data.outb += bytes(simplify(result) if args.plain else json.dumps(result), 'ascii')
-								key.data.inb = p[1] if len(p) > 1 else None
+								event.data.outb += bytes(simplify(result) if args.plain else json.dumps(result), 'ascii')
+								event.data.inb = p[1] if len(p) > 1 else None
 						else:
 							print(f"Closing connection to {data.addr}")
-							sel.unregister(key.fileobj)
-							key.fileobj.close()
+							sel.unregister(event.fileobj)
+							event.fileobj.close()
 					if mask & selectors.EVENT_WRITE:
-						if key.data.outb:
-							print(f"Replying {len(key.data.outb)} bytes to {data.addr}")
-							sent = key.fileobj.send(key.data.outb)  # Should be ready to write
-							key.data.outb = key.data.outb[sent:]
+						if event.data.outb:
+							if args.plain:
+								print(f"Replying to {data.addr} with {event.data.outb.decode('ascii').strip()}")
+							else:
+								print(f"Replying to {data.addr} with {len(event.data.outb)} bytes json")
+							sent = event.fileobj.send(event.data.outb)  # Should be ready to write
+							event.data.outb = event.data.outb[sent:]
 
-	except KeyboardInterrupt:
-		print("Caught keyboard interrupt, exiting", file=sys.stderr)
-	finally:
-		sel.close()
+		except KeyboardInterrupt:
+			print("Caught keyboard interrupt, exiting", file=sys.stderr)
+			break
+		except ConnectionError as e:
+			print("Connection error: {e.error_message}", file=sys.stderr)
+	sel.close()
 
 if __name__ == '__main__':
 	# Arguments
