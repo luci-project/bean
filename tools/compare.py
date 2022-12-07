@@ -28,6 +28,7 @@ parser = argparse.ArgumentParser(description="Compare different versions of a bi
 parser.add_argument("base", type=dir_path, help="the base directory containing all versions of a package")
 parser.add_argument('--difftool', help="the bean update check tool", default="bean-diffstat")
 parser.add_argument('--hashtool', help="the bean dwarf variable hash tool", default="bean-elfvars")
+parser.add_argument('-m', '--matrix', help='Compare each version with each other', action='store_true')
 parser.add_argument('-l', '--lib', help='filter library names (by regex)', nargs='*')
 parser.add_argument('-d', '--verdir', help='filter version directories (by regex)', nargs='*')
 parser.add_argument('-o', '--output', type=argparse.FileType('w'), help='export output to file[s] (html/svg/text)', nargs='*')
@@ -87,9 +88,10 @@ def walk_directory(directory: Path, tree: Tree, base: str, objs: set) -> None:
 
 console = Console()
 tree = Tree(escape(base.name))
-start=next(iter(sorted_dirs))
+start = next(iter(sorted_dirs))
 walk_directory(start, tree, start, objs)
 console.print(tree)
+
 
 if args.output:
 	devnull = open(os.devnull, 'w')
@@ -112,9 +114,9 @@ def add_details(text, data, section, dim):
 	changed = data['changed-external']['added']['size'] != 0 or data['changed-external']['removed']['size'] != 0
 	highlight = section in [ 'bss', 'data', 'tdata', 'tbss', 'init' ];
 	if args.verbose > 1 or (args.verbose == 1 and changed):
-		text.append(Text(f"\n.{section}", Style(italic=not changed, dim=dim, bold=highlight)))
+		text.append(Text(f"\n.{section}", Style(italic=not changed, color='white' if changed else None, dim=dim, bold=highlight)))
 	if args.verbose > 1:
-		text.append(Text("\n   {count}: {size}B".format_map(data['total']), Style(italic=not changed, dim=dim)))
+		text.append(Text("\n   {count}: {size}B".format_map(data['total']), Style(italic=not changed, color='white' if changed else None, dim=dim)))
 		if args.verbose > 3:
 			if data['changed-internal']['added']['size'] != 0:
 				text.append(Text("\n(+ {count}:  {size}B)".format_map(data['changed-internal']['added']), Style(color='light_green', dim=dim)))
@@ -127,88 +129,111 @@ def add_details(text, data, section, dim):
 				text.append(Text("\n - {count}: {size}B".format_map(data['changed-external']['removed']), Style(color='light_coral', dim=dim)))
 
 
+def build_cell(result, obj, base, hashval, highlight = False):
+	dim = natsorted([obj, base], alg=ns.IGNORECASE, key=str)[0] == obj
+	text=[]
+	hashsuccess = not hashval[base] or not hashval[obj] or hashval[base] == hashval[obj]
+	for section, data in result.items():
+		if section == "patchable":
+			if data and hashsuccess:
+				t = "update"
+				c = "green"
+			else:
+				t = "restart"
+				c = "red"
+
+			if obj == base:
+				t = "(" + t + ")"
+			text.append(Text(t, Style(color=c, dim=dim, underline=highlight)))
+
+		elif section == "build-id":
+			changed = data['added'] != data['removed']
+			if args.verbose > 1 or (args.verbose == 1 and changed):
+				text.append(Text(f"\n.build-id", Style(italic=not changed, color='white' if changed else None, dim=dim)))
+			if args.verbose > 1:
+				color = 'light_green' if args.verbose > 2 else 'white'
+				text.append(Text("\n {added}".format_map(data), Style(color=color if changed else None, dim=dim)))
+				if args.verbose > 2 and changed:
+					text.append(Text("\n {removed}".format_map(data), Style(color='light_coral', dim=dim)))
+
+		elif 'total' in data:
+			add_details(text, data, section, obj <= base)
+
+	if len(text) == 0:
+		text.append(Text("error", Style(color="red")))
+	elif args.verbose >= 1:
+		if hashval[obj]:
+			if args.verbose > 1 or (args.verbose == 1 and hashsuccess):
+				if not 'debug' in hashval[obj]:
+					# No debug symbols
+					hashstatus = ' *'
+				elif 'debug-incomplete' in hashval[obj] and hashval[obj]['debug-incomplete']:
+					# Errors during hashing
+					hashstatus = ' !'
+				else:
+					hashstatus = ''
+				text.append(Text(f"\n.debug{hashstatus}", Style(italic=hashsuccess, color='white' if not hashsuccess else None, dim=dim, bold=True)))
+			if args.verbose > 1:
+				for k,v in hashval[obj].items():
+					n = 'dt' if k == 'datatypes' else k
+					changed = k in hashval[base] and hashval[base][k] != v
+					color = 'light_green' if args.verbose > 2 else 'white'
+					text.append(Text(f"\n {n}:{v}", Style(color=color if changed else None, dim=dim)))
+					if args.verbose > 2 and changed:
+						text.append(Text(f"\n {n}:{hashval[base][k] }", Style(color='light_coral', dim=dim)))
+
+
+		text.append("\n");
+
+	return text
+
+
 for o in sorted_objs:
 	table = Table(title=Text.assemble(str(o.parent), "/", (str(o.name), Style(bold=True))), show_header=True, header_style="bold")
-	table.add_column("Package", style="dim")
+	if args.matrix:
+		table.add_column("Package", style="dim")
 
 	with Progress(transient=True) as progress:
-		task = progress.add_task(f"Processing {escape(o.name)}...", total=(len(dirs) ** 2 + len(dirs)))
+		task = progress.add_task(f"Processing {escape(o.name)}...", total=(len(dirs) ** (1 + int(args.matrix)) + len(dirs)))
 
 		with multiprocessing.Pool(processes=args.nproc) as pool:
 			diffs={}
 			elfvars={}
+			last = None
 			for a in sorted_dirs:
-				tmpdiff={}
 				elfvars[str(a.name)] = pool.apply_async(exec_json, (args.hashtool, '-r', str(a), '-d', '-w', '-D', '-t',  str(a.joinpath(o))), callback=lambda r : progress.advance(task))
-				for b in sorted_dirs:
-					tmpdiff[str(b.name)] = pool.apply_async(exec_json, (args.difftool, str(a.joinpath(o)), str(b.joinpath(o))), callback=lambda r : progress.advance(task))
-				diffs[str(a.name)] = tmpdiff
+				if args.matrix:
+					tmpdiff={}
+					for b in sorted_dirs:
+						tmpdiff[str(b.name)] = pool.apply_async(exec_json, (args.difftool, str(a.joinpath(o)), str(b.joinpath(o))), callback=lambda r : progress.advance(task))
+					diffs[str(a.name)] = tmpdiff
+				else:
+					diffs[str(a.name)] = pool.apply_async(exec_json, (args.difftool, str((last or a).joinpath(o)), str(a.joinpath(o))), callback=lambda r : progress.advance(task))
 				table.add_column(Text(escape(a.name), justify="center", overflow="fold"))
+				last = a
 
 			hashval={}
 			for obj, data in elfvars.items():
 				d = data.get()
 				hashval[obj] = {k: v['hash'] for k,v in d[0].items() if type(v) is dict and 'hash' in v } if len(d) > 0 else {}
 
-			for coltitle, cells in diffs.items():
-				line=[Text(escape(coltitle), overflow="fold")]
+			if args.matrix:
+				for coltitle, cells in diffs.items():
+					line = [Text(escape(coltitle), overflow="fold")]
+					last = None
+					for obj, thread in cells.items():
+						text = build_cell(thread.get(), obj, coltitle, hashval, last == coltitle)
+						line.append(Text.assemble(*text))
+						last = obj
+					table.add_row(*line)
+			else:
+				line = []
 				last = None
-				for obj, thread in cells.items():
-					result = thread.get()
-					dim = natsorted([obj, coltitle], alg=ns.IGNORECASE, key=str)[0] == obj
-					text=[]
-					hashsuccess = not hashval[coltitle] or not hashval[obj] or hashval[coltitle] == hashval[obj]
-					for section, data in result.items():
-						if section == "patchable":
-							if data and hashsuccess:
-								t = "update"
-								c = "green"
-							else:
-								t = "restart"
-								c = "red"
-
-							if obj == coltitle:
-								t = "(" + t + ")"
-							text.append(Text(t, Style(color=c, dim=dim, underline= last == coltitle)))
-
-						elif section == "build-id":
-							changed = data['added'] != data['removed']
-							if args.verbose > 1 or (args.verbose == 1 and changed):
-								text.append(Text(f"\n.build-id", Style(italic=not changed, dim=dim)))
-							if args.verbose > 1:
-								text.append(Text("\n {added}".format_map(data), Style(color='light_green', dim=dim)))
-								text.append(Text("\n {removed}".format_map(data), Style(color='light_coral', dim=dim)))
-
-						elif 'total' in data:
-							add_details(text, data, section, obj <= coltitle)
-
-					if len(text) == 0:
-						text.append(Text("error", Style(color="red")))
-					elif args.verbose >= 1:
-						if hashval[obj]:
-							if args.verbose > 1 or (args.verbose == 1 and hashsuccess):
-								if not 'debug' in hashval[obj]:
-									# No debug symbols
-									hashstatus = ' *'
-								elif 'debug-incomplete' in hashval[obj] and hashval[obj]['debug-incomplete']:
-									# Errors during hashing
-									hashstatus = ' !'
-								else:
-									hashstatus = ''
-								text.append(Text(f"\n.debug{hashstatus}", Style(italic=hashsuccess, dim=dim, bold=True)))
-							if args.verbose > 2:
-								for k,v in hashval[obj].items():
-									n = 'dt' if k == 'datatypes' else k
-									text.append(Text(f"\n {n}:{v}", Style(color='light_coral' if k in hashval[coltitle] and hashval[coltitle][k] != v else None, dim=dim)))
-
-
-						text.append("\n");
+				for obj, thread in diffs.items():
+					text = build_cell(thread.get(), obj, last or obj, hashval)
 					line.append(Text.assemble(*text))
-
 					last = obj
-
 				table.add_row(*line)
-
 
 	console.print(table, end='\n')
 	if args.output:
