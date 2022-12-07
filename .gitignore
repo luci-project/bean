@@ -2,3 +2,4 @@
 bean-*
 lib*.a
 __pycache__
+.elfvarsd-cache*

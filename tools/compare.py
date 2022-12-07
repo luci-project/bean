@@ -215,7 +215,7 @@ for o in sorted_objs:
 			hashval={}
 			for obj, data in elfvars.items():
 				d = data.get()
-				hashval[obj] = {k: v['hash'] for k,v in d[0].items() if type(v) is dict and 'hash' in v } if len(d) > 0 else {}
+				hashval[obj] = {k: v['hash'] for k,v in d[0].items() if type(v) is dict and 'hash' in v } if len(d) > 0 and d[0] else {}
 
 			if args.matrix:
 				for coltitle, cells in diffs.items():

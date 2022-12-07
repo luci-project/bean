@@ -92,14 +92,14 @@ struct BeanFile {
 			if (section.type() == Elf::SHT_NOTE)
 				for (auto & note : section.get_notes())
 					if (note.name() != nullptr && strcmp(note.name(), "GNU") == 0 && note.type() == Elf::NT_GNU_BUILD_ID) {
-							auto desc = reinterpret_cast<const uint8_t *>(note.description());
-							path << debug_root << "/usr/lib/debug/.build-id/" << hex << right << setfill('0') << setw(2) << static_cast<uint32_t>(desc[0]) << '/';
-							for (size_t i = 1; i < note.size(); i++)
-								path << hex << right << setfill('0') << setw(2)  << static_cast<uint32_t>(desc[i]);
-							path << ".debug";
-							if (File::readable(path.str()))
-								return new ElfFile(path.str());
-							path.clear();
+						auto desc = reinterpret_cast<const uint8_t *>(note.description());
+						path << debug_root << "/usr/lib/debug/.build-id/" << hex << right << setfill('0') << setw(2) << static_cast<uint32_t>(desc[0]) << '/';
+						for (size_t i = 1; i < note.size(); i++)
+							path << hex << right << setfill('0') << setw(2)  << static_cast<uint32_t>(desc[i]);
+						path << ".debug";
+						if (File::readable(path.str()))
+							return new ElfFile(path.str());
+						path.clear();
 					}
 
 		// Debug link
