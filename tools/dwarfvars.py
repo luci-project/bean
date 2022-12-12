@@ -11,53 +11,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-# TODO: Use pyelftools instead
-
-def get_debugbin(filepath, root = '', buildid = None, debuginfod = True):
-	if root:
-		root_dir = Path(root).absolute()
-		root = str(root_dir)
-		filepath = '/' + str(Path(filepath).relative_to(root_dir))
-
-	dbgsyms = []
-	ids = []
-	if buildid:
-		dbgsyms.append(root + '/usr/lib/debug/.build-id/' + buildid[:2] + '/' + buildid[2:] + '.debug')
-		ids.append(buildid)
-	else:
-		# Debug symbols via Build ID
-		buildids = regex.compile(r'^\s*Build-ID: ([0-9a-f]+)$')
-		readelf = subprocess.Popen(['readelf', '-n', root + filepath], stdout=subprocess.PIPE)
-		while line := readelf.stdout.readline().decode('utf-8'):
-			if buildid := buildids.match(line):
-				dbgsyms.append(root + '/usr/lib/debug/.build-id/' + buildid.group(1)[:2] + '/' + buildid.group(1)[2:] + '.debug')
-				ids.append(buildid.group(1))
-
-	dbgsyms.append(root + filepath + '.debug')
-	dbgsyms.append(root + os.path.dirname(filepath) + '/.debug/' + os.path.basename(filepath) + '.debug')
-	dbgsyms.append(root + '/usr/lib/debug' + filepath + '.debug')
-	# non conforming
-	dbgsyms.append(root + os.path.dirname(filepath) + '/.debug/' + os.path.basename(filepath))
-	dbgsyms.append(root + '/usr/lib/debug' + filepath)
-
-	for dbgsym in dbgsyms:
-		if os.path.exists(dbgsym):
-			return dbgsym
-
-	if debuginfod:
-		for service in [ 'https://debuginfod.debian.net', 'https://debuginfod.ubuntu.com' ]:
-			for id in ids:
-				try:
-					with urllib.request.urlopen(f'{service}/buildid/{id}/debuginfo') as fp:
-						target = Path(f'{root}/usr/lib/debug/.build-id/{id[:2]}/{id[2:]}.debug')
-						target.parent.mkdir(parents=True, exist_ok=True)
-						with open(target,'wb') as output:
-							shutil.copyfileobj(fp, output)
-						return str(target)
-				except:
-					continue
-
-	return None
+from dbgsym import DebugSymbol
 
 class DwarfVars:
 	def __init__(self, file, aliases = True, names = True, external_dbgsym = True, root = ''):
@@ -78,7 +32,7 @@ class DwarfVars:
 		elif self.parse(file):
 			self.dbgsym = file
 		elif external_dbgsym:
-			self.dbgsym = get_debugbin(file, root)
+			self.dbgsym = DebugSymbol(file, root).find()
 
 		# Not found:
 		if not self.dbgsym:
@@ -423,9 +377,10 @@ class DwarfVars:
 
 if __name__ == '__main__':
 	# Arguments
-	parser = argparse.ArgumentParser(prog='PROG')
+	parser = argparse.ArgumentParser(description="Dwarf Variables Dump")
 	parser.add_argument('-a', '--aliases', action='store_true', help='Include aliases (typedefs)')
 	parser.add_argument('-n', '--names', action='store_true', help='Include names (complex types / members)')
+	parser.add_argument('-b', '--base', help='Path prefix for debug symbol files', default='')
 	subparsers = parser.add_subparsers(title='Extract', dest='extract', required=True, help='Information to extract')
 	parser.add_argument('file', metavar="FILE", help="ELF file with debug information")
 	parser_var = subparsers.add_parser('variables', help='All static variables')
@@ -440,7 +395,7 @@ if __name__ == '__main__':
 		print(f"Input file '{args.file}' does not exist!", file=sys.stderr)
 		sys.exit(1)
 
-	dwarf = DwarfVars(args.file, aliases = args.aliases, names = args.names)
+	dwarf = DwarfVars(args.file, aliases = args.aliases, names = args.names, root = args.base)
 	if args.extract == 'variables':
 		variables = sorted(dwarf.get_vars(args.tls), key=lambda i: i['value'])
 		if args.json:

@@ -16,7 +16,9 @@ import argparse
 import functools
 import selectors
 
-from dwarfvars import get_debugbin, DwarfVars
+from pathlib import Path
+from dwarfvars import DwarfVars
+from dbgsym import DebugSymbol
 
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection, NoteSection
@@ -65,20 +67,20 @@ def sortuniq_datatypes(datatypelist):
 class ElfVar:
 	def __init__(self, file, root=''):
 		# Find ELF file
-		if isinstance(file, str):
-			if os.path.exists(file):
-				self.path = os.path.realpath(file)
-			elif os.path.exists(root + '/' + file):
-				self.path = os.path.realpath(root + '/' + file)
-			else:
-				raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), file)
-			self.file = open(self.path, "rb")
-		elif isinstance(file, io.BufferedReader):
-			self.path = os.path.realpath(file.name)
+		self.root = Path(root).absolute()
+		if isinstance(file, io.BufferedReader):
+			self.path = Path(file.name).resolve()
 			self.file = file
 		else:
-			raise TypeError(f"File has invalid type {type(file)}")
-		self.root = root
+			path = Path(path)
+			if path.exists():
+				self.path = path.absolute()
+			elif (self.root / path).exists():
+				self.path = (self.root / path)
+			else:
+				raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), file)
+			self.file = open(str(self.path), "rb")
+
 		self.elf = ELFFile(self.file)
 		self.dbgsym = None
 
@@ -89,11 +91,12 @@ class ElfVar:
 		self.relro = None
 		self.dwarf = None
 
-		# Get build ID
+		# Get build ID and debug link (if available)
 		self.buildid = None
+		self.debuglink = None
 		for section in self.elf.iter_sections():
-			if self.buildid:
-				break
+			if section.name == '.gnu_debuglink':
+				self.debuglink = section.data().split(b'\x00', 1)[0].decode('ascii')
 			elif isinstance(section, NoteSection):
 				for note in section.iter_notes():
 					if note['n_type'] == 'NT_GNU_BUILD_ID' and note['n_size'] == 36:
@@ -104,11 +107,9 @@ class ElfVar:
 		if self.elf.has_dwarf_info() and next(self.elf.get_dwarf_info().iter_CUs(), False):
 			self.dbgsym = self.path
 		elif extern:
-			self.dbgsym = get_debugbin(self.path, self.root, self.buildid)
-
+			self.dbgsym = DebugSymbol(self.path, self.root).find(self.debuglink, self.buildid)
 		if self.dbgsym:
 			self.dwarf = DwarfVars(self.dbgsym, aliases = aliases, names = names)
-
 
 	def load_segments(self):
 		if len(self.segments) == 0:
@@ -228,24 +229,26 @@ class ElfVar:
 			variables = list(sortuniq_symbols(symbols))
 
 		info = {
-			"file": os.path.realpath(self.file.name).lstrip(self.root),
+			"file": str(self.path.relative_to(self.root)),
 			"buildid": self.buildid,
 			"variables": len(variables)
 		}
 		if self.dbgsym and self.dwarf:
-			info["debug"] = os.path.realpath(self.dbgsym).lstrip(self.root)
+			info["debug"] = str(Path(self.dbgsym).relative_to(self.root)) if self.root else self.dbgsym
 			info["debug-incomplete"] = self.dwarf and self.dwarf.incomplete
 
 		for cat in sorted(self.categories):
 			if writable_only and not 'W' in cat and cat != 'TLS':
 				continue
 
-			hash = xxhash.xxh64()
 			info[cat] = {}
 			if verbose:
 				info[cat]["details"] = []
 			vars = filter(lambda x: x['category'] == cat, variables)
+			hash = xxhash.xxh64()
+			hasVar = False
 			for var in vars:
+				hasVar = True
 				if verbose:
 					info[cat]["details"].append(str(var))
 				if names:
@@ -253,7 +256,8 @@ class ElfVar:
 				if 'hash' in var:
 					hash.update('#' + var['hash'])
 				hash.update('@' + str(var['value']) + '/' + str(var['align']) + ':' + str(var['size']))
-			info[cat]["hash"] = hash.hexdigest()
+			if hasVar:
+				info[cat]["hash"] = hash.hexdigest()
 
 		if datatypes and self.dwarf:
 			datatypes = []
@@ -285,7 +289,7 @@ def get_cache_key(buildid, args):
 
 def get_data(file, args, cache):
 	try:
-		elf = ElfVar(file, args.root)
+		elf = ElfVar(file, args.base)
 		key = get_cache_key(elf.buildid, args)
 		if args.cache and key in cache:
 			return cache[key]
@@ -364,12 +368,12 @@ def listen_socket(socket, args, cache):
 
 if __name__ == '__main__':
 	# Arguments
-	parser = argparse.ArgumentParser(prog='PROG')
+	parser = argparse.ArgumentParser(description="Elf Symbol Hash")
 	parser.add_argument('-a', '--aliases', action='store_true', help='Include aliases (typedefs)')
 	parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
 	parser.add_argument('-d', '--dbgsym', action='store_true', help='use debug symbols')
 	parser.add_argument('-D', '--dbgsym_extern', action='store_true', help='use external debug symbols (implies -d)')
-	parser.add_argument('-r', '--root', help='Path prefix for debug symbol files', default='')
+	parser.add_argument('-b', '--base', help='Path prefix for debug symbol files', default='')
 	parser.add_argument('-t', '--datatypes', action='store_true', help='Hash datatypes (requires debug symbols)')
 	parser.add_argument('-w', '--writable', action='store_true', help='Ignore non-writable sections')
 	parser.add_argument('-i', '--identical', action='store_true', help='Check if hashes of input files are identical')
