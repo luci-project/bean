@@ -9,6 +9,8 @@ int main(int argc, const char *argv[]) {
 	bool dependencies = false;
 	bool dbgsym = false;
 	bool reloc = false;
+	const char * old_base = nullptr;
+	const char * new_base = nullptr;
 	const char * old_path = nullptr;
 	const char * new_path = nullptr;
 	BeanFile * a = nullptr;
@@ -21,6 +23,15 @@ int main(int argc, const char *argv[]) {
 			dbgsym = true;
 		} else if (String::compare(argv[i], "-r") == 0) {
 			reloc = true;
+		} else if (String::compare(argv[i], "-b") == 0) {
+			if (old_base == nullptr) {
+				old_base = argv[++i];
+			} else if (new_base == nullptr) {
+				new_base = argv[++i];
+			} else {
+				cerr << "Invalid third base parameter " << argv[++i] << endl;
+				return EXIT_FAILURE;
+			}
 		} else if (String::compare(argv[i], "-v", 2) == 0) {
 			for (size_t j = 1; argv[i][j] != '\0'; j++) {
 				if (argv[i][j] == 'v') {
@@ -42,22 +53,23 @@ int main(int argc, const char *argv[]) {
 		}
 	}
 
-	if (new_path == nullptr) {
+	if (new_path == nullptr && new_base == nullptr) {
 		cerr << "Compare ELF binaries A and B" << endl << endl
-		     << "   Usage: " << argv[0] << " [-d] [-s] [-r] [-v[v]] OLD NEW" << endl << endl
+		     << "   Usage: " << argv[0] << " [-r]  [-d] [-s] [-b [OLD]BASE [-b NEWBASE]] [-v[v[v]]] OLD NEW" << endl << endl
 		     << "Parameters:" << endl
+		     << "  -r    resolve (internal) relocations" << endl
 		     << "  -d    include dependencies" << endl
 		     << "  -s    use (external) debug symbols" << endl
-		     << "        environment variabl DEBUG_ROOT can be used to specify the base directory" << endl
-		     << "  -r    resolve (internal) relocations" << endl
+		     << "  -b    base directory to search for debug files" << endl
+		     << "        (if this is set a second time, it will be used for the second [new] binary)"
 		     << "  -v    list address and names" << endl
 		     << "  -vv   ... and dissassemble code" << endl
 		     << "  -vvv  ... and show all references and relocations" << endl;
 		return EXIT_FAILURE;
 	}
 
-	BeanFile old_file(old_path, dbgsym, reloc, verbose >= Bean::DEBUG);
-	BeanFile new_file(new_path, dbgsym, reloc, verbose >= Bean::DEBUG);
+	BeanFile old_file(old_path, dbgsym, reloc, verbose >= Bean::DEBUG, old_base);
+	BeanFile new_file(new_path == nullptr ? old_path : new_path, dbgsym, reloc, verbose >= Bean::DEBUG, new_base == nullptr ? old_base : new_base);
 
 	auto & diff = new_file.bean.diff(old_file.bean, dependencies);
 

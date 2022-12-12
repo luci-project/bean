@@ -1,17 +1,23 @@
 #include <dlh/stream/output.hpp>
+#include <dlh/assert.hpp>
 #include <dlh/string.hpp>
 
 #include <bean/file.hpp>
+#include <bean/helper/build_id.hpp>
 
 struct Diff {
 	BeanFile a_file, b_file;
+	BuildID a_buildid, b_buildid;
 	Bean::syminthash_t a_internal, b_internal;
 	Bean::symhash_t a_external, b_external;
 
-	Diff(const char * a_path, const char * b_path, bool dbgsym, bool reloc, bool dependencies) :
-		a_file(a_path, dbgsym, reloc), b_file(b_path, dbgsym, reloc),
+	Diff(const char * a_base, const char * a_path, const char * b_base, const char * b_path, bool dbgsym, bool reloc, bool dependencies) :
+		a_file(a_path, dbgsym, reloc, false, a_base), b_file(b_path == nullptr ? a_path : b_path , dbgsym, reloc, false, b_base == nullptr ? a_base : b_base),
+		a_buildid(a_file.binary.content), b_buildid(b_file.binary.content),
 		a_internal(a_file.bean.diff_internal(b_file.bean, dependencies)), b_internal(b_file.bean.diff_internal(a_file.bean, dependencies)),
-		a_external(a_file.bean.diff(b_file.bean, dependencies)), b_external(b_file.bean.diff(a_file.bean, dependencies)) {}
+		a_external(a_file.bean.diff(b_file.bean, dependencies)), b_external(b_file.bean.diff(a_file.bean, dependencies)) {
+		assert(b_base != nullptr || b_path != nullptr);
+	}
 
  private:
 	template<typename T>
@@ -30,21 +36,6 @@ struct Diff {
 		cout << endl;
 		for (size_t d = 0; d < depth; d++)
 			cout << '\t';
-	}
-
-	static void print_buildid(BeanFile & f) {
-		for (auto & section: f.binary.content.sections)
-			if (section.type() == Elf::SHT_NOTE)
-				for (auto & note : section.get_notes())
-					if (note.name() != nullptr && strcmp(note.name(), "GNU") == 0 && note.type() == Elf::NT_GNU_BUILD_ID) {
-						auto desc = reinterpret_cast<const uint8_t *>(note.description());
-						for (size_t i = 0; i < note.size(); i++) {
-							cout << hex << right << setfill('0') << setw(2) << static_cast<uint32_t>(desc[i]);
-						}
-						cout << left << dec << setw(0);
-						return;
-					}
-		// TODO: Use segment as fallback
 	}
 
 	static void print_count(const char * name, size_t depth, Pair<size_t, size_t> data) {
@@ -89,13 +80,9 @@ struct Diff {
 		print_startline(1);
 		cout << "\"build-id\": {";
 		print_startline(2);
-		cout << "\"added\": \"";
-		print_buildid(b_file);
-		cout << "\",";
+		cout << "\"added\": \"" << a_buildid.value << "\",";
 		print_startline(2);
-		cout << "\"removed\": \"";
-		print_buildid(a_file);
-		cout << '"';
+		cout << "\"removed\": \"" << a_buildid.value << '"';
 		print_startline(1);
 		cout << "},";
 		print_filter("init", 1, [](const Bean::Symbol & sym) {
@@ -141,6 +128,8 @@ int main(int argc, const char *argv[]) {
 	bool dependencies = false;
 	bool dbgsym = false;
 	bool reloc = false;
+	const char * old_base = nullptr;
+	const char * new_base = nullptr;
 	const char * old_path = nullptr;
 	const char * new_path = nullptr;
 	BeanFile * a = nullptr;
@@ -153,6 +142,15 @@ int main(int argc, const char *argv[]) {
 			dbgsym = true;
 		} else if (String::compare(argv[i], "-r") == 0) {
 			reloc = true;
+		} else if (String::compare(argv[i], "-b") == 0) {
+			if (old_base == nullptr) {
+				old_base = argv[++i];
+			} else if (new_base == nullptr) {
+				new_base = argv[++i];
+			} else {
+				cerr << "Invalid third base parameter " << argv[++i] << endl;
+				return EXIT_FAILURE;
+			}
 		} else if (argv[i][0] == '-') {
 			cerr << "Unsupported parameter '" << argv[i] << endl;
 			return EXIT_FAILURE;
@@ -165,18 +163,19 @@ int main(int argc, const char *argv[]) {
 		}
 	}
 
-	if (new_path == nullptr) {
+	if (new_path == nullptr && new_base == nullptr) {
 		cerr << "Summary of differences between two ELF binaries A and B" << endl << endl
 		     << "   Usage: " << argv[0] << " [-d] [-s] [-r] A B" << endl << endl
 		     << "Parameters:" << endl
-		     << "  -d   include dependencies" << endl
+		     << "  -r    resolve (internal) relocations" << endl
+		     << "  -d    include dependencies" << endl
 		     << "  -s    use (external) debug symbols" << endl
-		     << "        environment variabl DEBUG_ROOT can be used to specify the base directory" << endl
-		     << "  -r    resolve (internal) relocations" << endl;
+		     << "  -b    base directory to search for debug files" << endl
+		     << "        (if this is set a second time, it will be used for the second [new] binary)" << endl;
 		return EXIT_FAILURE;
 	}
 
-	Diff(old_path, new_path, dbgsym, reloc, dependencies).print();
+	Diff(old_base, old_path, new_base, new_path, dbgsym, reloc, dependencies).print();
 
 	return EXIT_SUCCESS;
 }
