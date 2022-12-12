@@ -30,6 +30,8 @@ parser.add_argument('--difftool', help="the bean update check tool", default="be
 parser.add_argument('--hashtool', help="the bean dwarf variable hash tool", default="bean-elfvars")
 parser.add_argument('-m', '--matrix', help='Compare each version with each other', action='store_true')
 parser.add_argument('-l', '--lib', help='filter library names (by regex)', nargs='*')
+parser.add_argument('-s', '--dbgsym', action='store_true', help='use (external?) debug symbols in difftool')
+parser.add_argument('-D', '--dependencies', action='store_true', help='recursivley check all dependencies')
 parser.add_argument('-d', '--verdir', help='filter version directories (by regex)', nargs='*')
 parser.add_argument('-o', '--output', type=argparse.FileType('w'), help='export output to file[s] (html/svg/text)', nargs='*')
 parser.add_argument('-n', '--nproc', type=int, help="Number of worker Threads", default=None)
@@ -107,7 +109,7 @@ def exec_json(*args):
 		else:
 			return {}
 	except Exception as e:
-		print(f"Executing of {args} failed: {e.message}", file=sys.stderr)
+		print(f"Executing of {args} failed: {e}", file=sys.stderr)
 		return {}
 
 def add_details(text, data, section, dim):
@@ -116,6 +118,7 @@ def add_details(text, data, section, dim):
 	if args.verbose > 1 or (args.verbose == 1 and changed):
 		text.append(Text(f"\n.{section}", Style(italic=not changed, color='white' if changed else None, dim=dim, bold=highlight)))
 	if args.verbose > 1:
+		#print(section, data)
 		text.append(Text("\n   {count}: {size}B".format_map(data['total']), Style(italic=not changed, color='white' if changed else None, dim=dim)))
 		if args.verbose > 3:
 			if data['changed-internal']['added']['size'] != 0:
@@ -129,7 +132,7 @@ def add_details(text, data, section, dim):
 				text.append(Text("\n - {count}: {size}B".format_map(data['changed-external']['removed']), Style(color='light_coral', dim=dim)))
 
 
-def build_cell(result, obj, base, hashval, highlight = False):
+def build_cell(result, obj, base, hashval, hashdbg, highlight = False):
 	dim = natsorted([obj, base], alg=ns.IGNORECASE, key=str)[0] == obj
 	text=[]
 	hashsuccess = not hashval[base] or not hashval[obj] or hashval[base] == hashval[obj]
@@ -164,10 +167,10 @@ def build_cell(result, obj, base, hashval, highlight = False):
 	elif args.verbose >= 1:
 		if hashval[obj]:
 			if args.verbose > 1 or (args.verbose == 1 and hashsuccess):
-				if not 'debug' in hashval[obj]:
+				if not 'debug' in hashdbg[obj]:
 					# No debug symbols
 					hashstatus = ' *'
-				elif 'debug-incomplete' in hashval[obj] and hashval[obj]['debug-incomplete']:
+				elif 'debug-incomplete' in hashdbg[obj] and hashdbg[obj]['debug-incomplete']:
 					# Errors during hashing
 					hashstatus = ' !'
 				else:
@@ -181,7 +184,6 @@ def build_cell(result, obj, base, hashval, highlight = False):
 					text.append(Text(f"\n {n}:{v}", Style(color=color if changed else None, dim=dim)))
 					if args.verbose > 2 and changed:
 						text.append(Text(f"\n {n}:{hashval[base][k] }", Style(color='light_coral', dim=dim)))
-
 
 		text.append("\n");
 
@@ -201,28 +203,40 @@ for o in sorted_objs:
 			elfvars={}
 			last = None
 			for a in sorted_dirs:
-				elfvars[str(a.name)] = pool.apply_async(exec_json, (args.hashtool, '-r', str(a), '-d', '-w', '-D', '-t',  str(a.joinpath(o))), callback=lambda r : progress.advance(task))
+				elfvars[str(a.name)] = pool.apply_async(exec_json, (args.hashtool, '-b', str(a), '-d', '-w', '-D', '-t',  str(a.joinpath(o))), callback=lambda r : progress.advance(task))
+				diffflags = ('-d',) if args.dependencies else ()
 				if args.matrix:
 					tmpdiff={}
 					for b in sorted_dirs:
-						tmpdiff[str(b.name)] = pool.apply_async(exec_json, (args.difftool, str(a.joinpath(o)), str(b.joinpath(o))), callback=lambda r : progress.advance(task))
+						if args.dbgsym:
+							diffflags = (*diffflags, '-s', '-b', str(a), '-b', str(b))
+						tmpdiff[str(b.name)] = pool.apply_async(exec_json, (args.difftool, *diffflags, str(a.joinpath(o)), str(b.joinpath(o))), callback=lambda r : progress.advance(task))
 					diffs[str(a.name)] = tmpdiff
 				else:
-					diffs[str(a.name)] = pool.apply_async(exec_json, (args.difftool, str((last or a).joinpath(o)), str(a.joinpath(o))), callback=lambda r : progress.advance(task))
+					if args.dbgsym:
+						difflags = (*diffflags, '-s', '-b', str(last or a), '-b', str(a))
+					diffs[str(a.name)] = pool.apply_async(exec_json, (args.difftool, *diffflags, str((last or a).joinpath(o)), str(a.joinpath(o))), callback=lambda r : progress.advance(task))
 				table.add_column(Text(escape(a.name), justify="center", overflow="fold"))
 				last = a
 
 			hashval={}
+			hashdbg={}
 			for obj, data in elfvars.items():
 				d = data.get()
-				hashval[obj] = {k: v['hash'] for k,v in d[0].items() if type(v) is dict and 'hash' in v } if len(d) > 0 and d[0] else {}
+				if len(d) > 0 and d[0]:
+					i = d[0].items()
+					hashval[obj] = {k: v['hash'] for k,v in i if type(v) is dict and 'hash' in v}
+					hashdbg[obj] = {k: v for k, v in i if k.startswith('debug') }
+				else:
+					hashval[obj] = {}
+					hashdbg[obj] = {}
 
 			if args.matrix:
 				for coltitle, cells in diffs.items():
 					line = [Text(escape(coltitle), overflow="fold")]
 					last = None
 					for obj, thread in cells.items():
-						text = build_cell(thread.get(), obj, coltitle, hashval, last == coltitle)
+						text = build_cell(thread.get(), obj, coltitle, hashval, hashdbg, last == coltitle)
 						line.append(Text.assemble(*text))
 						last = obj
 					table.add_row(*line)
@@ -230,7 +244,7 @@ for o in sorted_objs:
 				line = []
 				last = None
 				for obj, thread in diffs.items():
-					text = build_cell(thread.get(), obj, last or obj, hashval)
+					text = build_cell(thread.get(), obj, last or obj, hashval, hashdbg)
 					line.append(Text.assemble(*text))
 					last = obj
 				table.add_row(*line)

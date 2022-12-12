@@ -575,7 +575,7 @@ class AnalyzeX86 : public Analyze<C> {
 				if (address >= seg.virt_addr() + seg.size())
 					is_bss = true;
 
-				//if (!is_bss) // TODO: Why?
+				if (!is_bss) // TODO: Why?
 					for (auto relocation = this->relocations.ceil(sym); relocation != this->relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
 						auto r = sym.rels.emplace(*relocation, this->resolve_internal_relocations, this->global_offset_table);
 						// Add local (internal) relocation as reference

@@ -8,6 +8,7 @@
 #include <dlh/file.hpp>
 
 #include <bean/bean.hpp>
+#include <bean/helper/debug_sym.hpp>
 
 struct ElfFile {
 	const char * path;
@@ -60,13 +61,14 @@ struct ElfFile {
 
 struct BeanFile {
 	const ElfFile binary;
-	const ElfFile * dbgsym;
+	const ElfFile * dbgsym = nullptr;
+	char path[PATH_MAX + 1] = { '\0' };
 
 	Bean bean;
 
-	BeanFile(const char * path, bool load_debug_symbols = false, bool resolve_relocations = true, bool debug = false)
-	  : binary(path),
-	    dbgsym(load_debug_symbols ? find_debug_symbols() : nullptr),
+	BeanFile(const char * path, bool load_debug_symbols = false, bool resolve_relocations = true, bool debug = false, const char * root = nullptr)
+	  : binary(resolve(path, root)),
+	    dbgsym(load_debug_symbols ? debug_symbols(root) : nullptr),
 	    bean(binary.content, dbgsym != nullptr ? &(dbgsym->content) : nullptr, resolve_relocations, debug) {}
 
 	~BeanFile() {
@@ -76,58 +78,24 @@ struct BeanFile {
 	}
 
  private:
-	ElfFile * find_debug_symbols() {
-		if (!binary.content.header.valid() || binary.content.header.type() == Elf::ET_CORE)
-			return nullptr;
-
-		StringStream<PATH_MAX + 1> path;
-
-		// Environment variable DEBUG_ROOT to search debug symbols in other locations
-		const char * debug_root = Environ::variable("DEBUG_ROOT");
-		if (debug_root == nullptr)
-			debug_root = "";
-
-		// check debug symbol using build ID
-		for (auto & section: binary.content.sections)
-			if (section.type() == Elf::SHT_NOTE)
-				for (auto & note : section.get_notes())
-					if (note.name() != nullptr && strcmp(note.name(), "GNU") == 0 && note.type() == Elf::NT_GNU_BUILD_ID) {
-						auto desc = reinterpret_cast<const uint8_t *>(note.description());
-						path << debug_root << "/usr/lib/debug/.build-id/" << hex << right << setfill('0') << setw(2) << static_cast<uint32_t>(desc[0]) << '/';
-						for (size_t i = 1; i < note.size(); i++)
-							path << hex << right << setfill('0') << setw(2)  << static_cast<uint32_t>(desc[i]);
-						path << ".debug";
-						if (File::readable(path.str()))
-							return new ElfFile(path.str());
-						path.clear();
-					}
-
-		// Debug link
-		char binpath[PATH_MAX + 1];
-		if (File::absolute(binary.path, binpath, PATH_MAX + 1)) {
-			// Same directory
-			path << binpath << ".debug";
-			if (File::readable(path.str()))
-				return new ElfFile(path.str());
-			path.clear();
-
-			// In a subdirectory called ".debug/"
-			char * slash = const_cast<char*>(String::find_last(binpath, '/'));
-			if (slash != nullptr) {
-				path.write(binpath, slash - binpath);
-				path << "/.debug" << slash << ".debug";
-				if (File::readable(path.str()))
-					return new ElfFile(path.str());
-				path.clear();
-			}
-
-			// With path as subdirectory in global debug folder
-			path << debug_root << "/usr/lib/debug" << binpath << ".debug";
-			if (File::readable(path.str()))
-				return new ElfFile(path.str());
+	const char * resolve(const char * path, const char * root) {
+		if (!File::exists(path) && root != nullptr) {
+			BufferStream(this->path, PATH_MAX + 1) << root << (root[String::len(root) - 1] == '/' ? "" : "/") << path;
+			cerr << "Got " << this->path << endl;
+			if (File::exists(this->path))
+				return this->path;
 		}
+		String::copy(this->path, path, PATH_MAX);
+		return this->path;
 
-		cerr << "No debug symbols for " << binpath << " found..." << endl;
+	}
+
+	ElfFile * debug_symbols(const char * root) {
+		const char * debug_path = DebugSymbol(path, root).find(binary.content);
+		cerr << "Debug path = " << debug_path <<endl;
+		if (debug_path != nullptr)
+			return new ElfFile(debug_path);
+
 		return nullptr;
 	}
 };
