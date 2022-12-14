@@ -256,7 +256,7 @@ for o in sorted_objs:
 if args.output:
 	for handle in args.output:
 		with handle as f:
-			print("(Exporting to {f.name}...", file=sys.stderr)
+			print(f"(Exporting to {f.name}...", file=sys.stderr)
 			if f.name.lower().endswith(('htm','html')):
 				f.write(output.export_html(clear=False))
 			elif f.name.lower().endswith(('svg')):

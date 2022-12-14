@@ -12,7 +12,7 @@ from elftools.elf.sections import SymbolTableSection, NoteSection
 # TODO: Use pyelftools instead
 class DebugSymbol:
 	def __init__(self, file, root='', elf = None, debug_dirs = [ ], debuginfodcache = '.debug-cache'):
-		self.root = Path(root).absolute() if root else Path('/')
+		self.root = Path(root).resolve() if root else Path('/')
 
 		self.elf = elf
 		if isinstance(file, io.BufferedReader):
@@ -118,10 +118,18 @@ class DebugSymbol:
 
 
 if __name__ == '__main__':
+
+	def dir_path(string):
+		path = Path(string)
+		if path.is_dir():
+			return str(path.resolve())
+		else:
+			raise NotADirectoryError(string)
+
 	# Arguments
 	parser = argparse.ArgumentParser(prog='Search (external) debug symbols for ELF file')
 	parser.add_argument('-d', '--debuginfod', action='store_true', help='Use Debuginfod service if no local symbols were found')
-	parser.add_argument('-b', '--base', help="Set base directory", default="/")
+	parser.add_argument('-b', '--base', type=dir_path, help="Set base directory", default="/")
 	parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
 	parser.add_argument('files', type=argparse.FileType('rb'), help="ELF file(s)", nargs='+')
 

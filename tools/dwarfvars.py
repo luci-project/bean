@@ -376,11 +376,21 @@ class DwarfVars:
 						yield cdef, size, DIE
 
 if __name__ == '__main__':
+
+	def dir_path(string):
+		if len(string) == 0:
+			return string
+		path = Path(string)
+		if path.is_dir():
+			return str(path.resolve())
+		else:
+			raise NotADirectoryError(string)
+
 	# Arguments
 	parser = argparse.ArgumentParser(description="Dwarf Variables Dump")
 	parser.add_argument('-a', '--aliases', action='store_true', help='Include aliases (typedefs)')
 	parser.add_argument('-n', '--names', action='store_true', help='Include names (complex types / members)')
-	parser.add_argument('-b', '--base', help='Path prefix for debug symbol files', default='')
+	parser.add_argument('-b', '--base', type=dir_path, help='Path prefix for debug symbol files', default='')
 	subparsers = parser.add_subparsers(title='Extract', dest='extract', required=True, help='Information to extract')
 	parser.add_argument('file', metavar="FILE", help="ELF file with debug information")
 	parser_var = subparsers.add_parser('variables', help='All static variables')

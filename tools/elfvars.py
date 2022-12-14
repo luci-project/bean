@@ -367,13 +367,23 @@ def listen_socket(socket, args, cache):
 	sel.close()
 
 if __name__ == '__main__':
+
+	def dir_path(string):
+		if len(string) == 0:
+			return string
+		path = Path(string)
+		if path.is_dir():
+			return str(path.resolve())
+		else:
+			raise NotADirectoryError(string)
+
 	# Arguments
 	parser = argparse.ArgumentParser(description="Elf Symbol Hash")
 	parser.add_argument('-a', '--aliases', action='store_true', help='Include aliases (typedefs)')
 	parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
 	parser.add_argument('-d', '--dbgsym', action='store_true', help='use debug symbols')
 	parser.add_argument('-D', '--dbgsym_extern', action='store_true', help='use external debug symbols (implies -d)')
-	parser.add_argument('-b', '--base', help='Path prefix for debug symbol files', default='')
+	parser.add_argument('-b', '--base', type=dir_path, help='Path prefix for debug symbol files', default='')
 	parser.add_argument('-t', '--datatypes', action='store_true', help='Hash datatypes (requires debug symbols)')
 	parser.add_argument('-w', '--writable', action='store_true', help='Ignore non-writable sections')
 	parser.add_argument('-i', '--identical', action='store_true', help='Check if hashes of input files are identical')
