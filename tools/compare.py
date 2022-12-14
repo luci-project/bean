@@ -31,8 +31,9 @@ parser.add_argument('--hashtool', help="the bean dwarf variable hash tool", defa
 parser.add_argument('-m', '--matrix', help='Compare each version with each other', action='store_true')
 parser.add_argument('-l', '--lib', help='filter library names (by regex)', nargs='*')
 parser.add_argument('-s', '--dbgsym', action='store_true', help='use (external?) debug symbols in difftool')
-parser.add_argument('-D', '--dependencies', action='store_true', help='recursivley check all dependencies')
-parser.add_argument('-d', '--verdir', help='filter version directories (by regex)', nargs='*')
+parser.add_argument('-d', '--dependencies', action='store_true', help='recursively check all dependencies')
+parser.add_argument('-r', '--relocations', action='store_true', help='resolve internal relocations')
+parser.add_argument('-D', '--verdir', help='filter version directories (by regex)', nargs='*')
 parser.add_argument('-o', '--output', type=argparse.FileType('w'), help='export output to file[s] (html/svg/text)', nargs='*')
 parser.add_argument('-n', '--nproc', type=int, help="Number of worker Threads", default=None)
 parser.add_argument('-v', '--verbose', action='count', default=0)
@@ -88,7 +89,7 @@ def walk_directory(directory: Path, tree: Tree, base: str, objs: set) -> None:
 		elif not path.name.endswith( ('.diff', '.dsc')):
 			tree.add(escape(path.name))
 
-console = Console()
+console = Console(highlight=False)
 tree = Tree(escape(base.name))
 start = next(iter(sorted_dirs))
 walk_directory(start, tree, start, objs)
@@ -135,15 +136,18 @@ def add_details(text, data, section, dim):
 def build_cell(result, obj, base, hashval, hashdbg, highlight = False):
 	dim = natsorted([obj, base], alg=ns.IGNORECASE, key=str)[0] == obj
 	text=[]
+	patchable = None
 	hashsuccess = not hashval[base] or not hashval[obj] or hashval[base] == hashval[obj]
 	for section, data in result.items():
 		if section == "patchable":
 			if data and hashsuccess:
 				t = "update"
 				c = "green"
+				patchable = True
 			else:
 				t = "restart"
 				c = "red"
+				patchable = False
 
 			if obj == base:
 				t = "(" + t + ")"
@@ -187,13 +191,15 @@ def build_cell(result, obj, base, hashval, hashdbg, highlight = False):
 
 		text.append("\n");
 
-	return text
+	return text, patchable
 
 
 for o in sorted_objs:
 	table = Table(title=Text.assemble(str(o.parent), "/", (str(o.name), Style(bold=True))), show_header=True, header_style="bold")
 	if args.matrix:
 		table.add_column("Package", style="dim")
+
+	patchcount = 0
 
 	with Progress(transient=True) as progress:
 		task = progress.add_task(f"Processing {escape(o.name)}...", total=(len(dirs) ** (1 + int(args.matrix)) + len(dirs)))
@@ -202,20 +208,23 @@ for o in sorted_objs:
 			diffs={}
 			elfvars={}
 			last = None
+			diffflags = ()
+			if args.dependencies:
+				diffflags = (*diffflags, '-d')
+			if args.relocations:
+				diffflags = (*diffflags, '-r')
+
 			for a in sorted_dirs:
 				elfvars[str(a.name)] = pool.apply_async(exec_json, (args.hashtool, '-b', str(a), '-d', '-w', '-D', '-t',  str(a.joinpath(o))), callback=lambda r : progress.advance(task))
-				diffflags = ('-d',) if args.dependencies else ()
 				if args.matrix:
 					tmpdiff={}
 					for b in sorted_dirs:
-						if args.dbgsym:
-							diffflags = (*diffflags, '-s', '-b', str(a), '-b', str(b))
-						tmpdiff[str(b.name)] = pool.apply_async(exec_json, (args.difftool, *diffflags, str(a.joinpath(o)), str(b.joinpath(o))), callback=lambda r : progress.advance(task))
+						flags = (*diffflags, '-s', '-b', str(a), '-b', str(b)) if args.dbgsym else diffflags
+						tmpdiff[str(b.name)] = pool.apply_async(exec_json, (args.difftool, *flags, str(a.joinpath(o)), str(b.joinpath(o))), callback=lambda r : progress.advance(task))
 					diffs[str(a.name)] = tmpdiff
 				else:
-					if args.dbgsym:
-						difflags = (*diffflags, '-s', '-b', str(last or a), '-b', str(a))
-					diffs[str(a.name)] = pool.apply_async(exec_json, (args.difftool, *diffflags, str((last or a).joinpath(o)), str(a.joinpath(o))), callback=lambda r : progress.advance(task))
+					flags = (*diffflags, '-s', '-b', str(last or a), '-b', str(a)) if args.dbgsym else diffflags
+					diffs[str(a.name)] = pool.apply_async(exec_json, (args.difftool, *flags, str((last or a).joinpath(o)), str(a.joinpath(o))), callback=lambda r : progress.advance(task))
 				table.add_column(Text(escape(a.name), justify="center", overflow="fold"))
 				last = a
 
@@ -236,7 +245,9 @@ for o in sorted_objs:
 					line = [Text(escape(coltitle), overflow="fold")]
 					last = None
 					for obj, thread in cells.items():
-						text = build_cell(thread.get(), obj, coltitle, hashval, hashdbg, last == coltitle)
+						text, patchable = build_cell(thread.get(), obj, coltitle, hashval, hashdbg, last == coltitle)
+						if last and last == coltitle and patchable:
+							patchcount = patchcount + 1
 						line.append(Text.assemble(*text))
 						last = obj
 					table.add_row(*line)
@@ -244,14 +255,30 @@ for o in sorted_objs:
 				line = []
 				last = None
 				for obj, thread in diffs.items():
-					text = build_cell(thread.get(), obj, last or obj, hashval, hashdbg)
+					text, patchable = build_cell(thread.get(), obj, last or obj, hashval, hashdbg)
+					if last and patchable:
+						patchcount = patchcount + 1
 					line.append(Text.assemble(*text))
 					last = obj
 				table.add_row(*line)
 
 	console.print(table, end='\n')
+	summary = f"For [b]{str(o.name)}[/b], [light_green]{patchcount}[/light_green] of {len(sorted_dirs) - 1} versions ([light_green]{round(100*patchcount/(len(sorted_dirs) - 1))}%[/light_green]) can be live patched"
+	settings = []
+	if args.dependencies:
+		settings.append("recusive symbol dependency checks")
+	if args.relocations:
+		settings.append("internal relocation resolving")
+	if args.dbgsym:
+		settings.append("(external?) debug symbols")
+	if len(settings) > 2:
+		summary += " with " + ", ".join(settings[:-1]) + " and " + settings[-1]
+	elif len(settings) > 0:
+		summary += " with " + " and ".join(settings)
+	console.print(f"[i]Summary:[/i] {summary}!\n", end='\n')
 	if args.output:
 		output.print(table, end='\n')
+		output.print(summary, end='\n')
 
 if args.output:
 	for handle in args.output:
