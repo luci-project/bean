@@ -1,5 +1,7 @@
 #include <bean/bean.hpp>
 
+static const char * bind_str[3] = { "local", "global", "weak" };
+
 void Bean::Symbol::Identifier::dump(BufferStream& bs) const {
 	bs << '{' << setfill('0') << hex << setw(16) << internal
 	   << ' ' << setfill('0') << hex << setw(16) << external
@@ -16,6 +18,9 @@ void Bean::Symbol::dump_name(BufferStream& bs) const {
 
 	bs << dec << size << " bytes @ 0x"
 	   << hex << address;
+
+	if (bind != Symbol::BIND_LOCAL)
+		bs << ", " << bind_str[bind];
 
 	if (section.name != nullptr)
 		bs << ", " << section.name;
@@ -54,7 +59,7 @@ void Bean::Symbol::dump_header(BufferStream & bs, Verbosity level) {
 	if (level <= VERBOSE) {
 		bs << "{ID               ID refs         }";
 		if (level == VERBOSE)
-			bs << " [Ref / Rel / Dep] - Address              Size Flg Name (Section)";
+			bs << " [Ref / Rel / Dep] - Address              Size Bind  Flag Name (Section)";
 		bs << endl;
 	}
 }
@@ -67,6 +72,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 			bs << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
 			   << "0x" << setw(16) << setfill('0') << hex << TLS::virt_addr(address)
 			   << dec << setw(7) << setfill(' ') << right << size << ' '
+			   << setw(6) << left << bind_str[bind] << ' '
 			   << (section.writeable ? ((section.flags & Symbol::Section::SECTION_RELRO) != 0 ? 'R' : 'W') : ' ') << (section.executable ? 'X' : ' ') << (TLS::is_tls(address) ? 'T' : ' ');
 			if (name != nullptr && name[0] != '\0')
 				bs << ' ' << name;

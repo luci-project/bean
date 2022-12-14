@@ -100,17 +100,38 @@ class Analyze {
 	}
 
 	/*! \brief Insert (or, if address range is already in use, merge) symbol */
-	void insert_symbol(uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false) {
+	void insert_symbol(uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false, Elf::sym_bind bind = Elf::STB_LOCAL) {
 		assert(!(executable && writeable));
 		assert(!(executable && Bean::TLS::is_tls(address)));
+		Bean::Symbol::Bind bean_bind = Bean::Symbol::BIND_LOCAL;
+		switch (bind) {
+			case Elf::STB_WEAK:
+				bean_bind = Bean::Symbol::BIND_WEAK;
+				break;
+
+			case Elf::STB_LOCAL:
+				bean_bind = Bean::Symbol::BIND_LOCAL;
+				break;
+
+			case Elf::STB_GLOBAL:
+				bean_bind = Bean::Symbol::BIND_GLOBAL;
+				break;
+
+			default:
+				assert(false && "Invalid bind type");
+		}
 		auto pos = symbols.find(address);
 		if (!pos) {
-			symbols.emplace(address, size, name, section_name, writeable, executable);
+			symbols.emplace(address, size, name, section_name, writeable, executable, bean_bind);
 		} else {
 			if (pos->section.name == nullptr && section_name != nullptr)
 				pos->section.name = section_name;
 			assert(pos->section.writeable == writeable);
 			assert(pos->section.executable == executable);
+
+			// Maximum bind wins
+			if (pos->bind < bean_bind)
+				pos->bind = bean_bind;
 
 			const auto max_address = Math::max(pos->address + pos->size, address + size);
 			bool new_name = name != nullptr &&  (pos->name == nullptr || pos->name[0] == '\0');
@@ -331,7 +352,7 @@ class Analyze {
 								if (sym.type() == ELF<C>::STT_TLS) {
 									assert(sym_sec.tls());
 									assert(tls_segment.has_value());
-									insert_symbol(Bean::TLS::trans_addr(tls_segment.value().virt_addr() + sym.value(), true), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
+									insert_symbol(Bean::TLS::trans_addr(tls_segment.value().virt_addr() + sym.value(), true), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.bind());
 								} else {
 									assert(!Bean::TLS::is_tls(sym.value()));  // check for address space conflicts
 									if (sym.type() != ELF<C>::STT_NOTYPE) {
@@ -339,7 +360,7 @@ class Analyze {
 										assert(sym.value() + sym.size() <= Math::align_up(sym_sec.virt_addr() + sym_sec.size(), sym_sec.alignment()));
 									}
 									if (sym.value() != 0 && elf_sections[sym.section_index()].allocate())
-										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable());
+										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.bind());
 								}
 							}
 						}
@@ -422,11 +443,17 @@ class Analyze {
 							}
 						}
 
-						// Hash ID and offset
-						id_external.add<uint64_t>(ref_sym->id.internal);
-						id_external.add<uint64_t>(ref - ref_sym->address);
-						ref_sym->deps.insert(sym.address);
-
+						// Ignore references to global symbols
+						// TODO: only limited to GOT...?
+						if (ref_sym->bind == Bean::Symbol::BIND_GLOBAL) {
+							// Since global symbols are part of the API,
+							// which must not been altered, there is no reason to check this
+						} else {
+							// Hash ID and offset
+							id_external.add<uint64_t>(ref_sym->id.internal);
+							id_external.add<uint64_t>(ref - ref_sym->address);
+							ref_sym->deps.insert(sym.address);
+						}
 					} else {
 						// TODO
 					}
