@@ -76,6 +76,7 @@ int main(int argc, const char *argv[]) {
 	if (verbose == Bean::NONE)
 		Bean::dump(cout, diff);
 	else {
+		Bean::Symbol::dump_header(cout << ' ', verbose);
 		auto removed = Bean::symtree_t(old_file.bean.diff(new_file.bean, dependencies));
 		auto rnext = removed.begin();
 		for (const auto & n : new_file.bean) {
