@@ -109,16 +109,13 @@ class Analyze {
 				bean_bind = Bean::Symbol::BIND_WEAK;
 				break;
 
-			case Elf::STB_LOCAL:
-				bean_bind = Bean::Symbol::BIND_LOCAL;
-				break;
-
 			case Elf::STB_GLOBAL:
 				bean_bind = Bean::Symbol::BIND_GLOBAL;
 				break;
 
 			default:
-				assert(false && "Invalid bind type");
+				// Keep default local (there is not only STB_LOCAL, but also stuff like STB_GNU_UNIQUE...)
+				break;
 		}
 		auto pos = symbols.find(address);
 		if (!pos) {
