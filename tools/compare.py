@@ -170,7 +170,7 @@ def build_cell(result, obj, base, hashval, hashdbg, highlight = False):
 		text.append(Text("error", Style(color="red")))
 	elif args.verbose >= 1:
 		if hashval[obj]:
-			if args.verbose > 1 or (args.verbose == 1 and hashsuccess):
+			if args.verbose > 1 or (args.verbose == 1 and not hashsuccess):
 				if not 'debug' in hashdbg[obj]:
 					# No debug symbols
 					hashstatus = ' *'
