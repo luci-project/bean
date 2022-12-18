@@ -111,7 +111,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 					} else {
 						bs << prefix << "     ";
 						auto ref_sym = Bean::dump_address(bs, ref, *symbols);
-						if (ref_sym->id.valid()) {
+						if (ref_sym && ref_sym->id.valid()) {
 							bs << ' ';
 							ref_sym->id.dump(bs);
 						}
@@ -138,7 +138,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 						bs << "0x" << hex << rel.addend;
 					} else {
 						auto ref_sym = Bean::dump_address(bs, rel.target, *symbols);
-						if (ref_sym->id.valid()) {
+						if (ref_sym && ref_sym->id.valid()) {
 							bs << ' ';
 							ref_sym->id.dump(bs);
 						}
@@ -158,7 +158,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 					} else {
 						bs << prefix << "     ";
 						auto ref_sym = Bean::dump_address(bs, dep, *symbols);
-						if (ref_sym->id.valid()) {
+						if (ref_sym && ref_sym->id.valid()) {
 							bs << ' ';
 							ref_sym->id.dump(bs);
 						}
