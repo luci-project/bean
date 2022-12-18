@@ -152,7 +152,12 @@ struct Bean {
 			uint16_t flags = SECTION_NONE;
 			static_assert(sizeof(Flags) == sizeof(flags), "Wrong flags size");
 
-			/*! \brief check if section flags match */
+			/*! \brief check if section flag is set */
+			bool has(Flags flag) const {
+				return (flags & flag) != 0;
+			}
+
+			/*! \brief check if section parameters match */
 			bool operator==(const Section & that) const {
 				return this->writeable == that.writeable && this->executable == that.executable && this->flags == that.flags;
 			}
@@ -324,7 +329,7 @@ struct Bean {
 	const HashSet<Symbol, T> diff(const HashSet<Symbol, T> & other_symbols, bool include_dependencies = false) const {
 		HashSet<Symbol, T> result;
 		for (const auto & sym : symbols)
-			if (!other_symbols.contains(sym) && result.insert(sym).second && include_dependencies)
+			if (!other_symbols.contains(sym) && sym.size > 0 && result.insert(sym).second && include_dependencies)
 				for (const auto d: sym.deps)
 					dependencies(d, result);
 		return result;

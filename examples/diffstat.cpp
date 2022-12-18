@@ -86,11 +86,11 @@ struct Diff {
 		print_startline(1);
 		cout << "},";
 		print_filter("init", 1, [](const Bean::Symbol & sym) {
-			return sym.section.flags == Bean::Symbol::Section::SECTION_INIT;
+			return sym.section.has(Bean::Symbol::Section::SECTION_INIT);
 		});
 		cout << ',';
 		print_filter("fini", 1, [](const Bean::Symbol & sym) {
-			return sym.section.flags == Bean::Symbol::Section::SECTION_FINI;
+			return sym.section.has(Bean::Symbol::Section::SECTION_FINI);
 		});
 		cout << ',';
 		print_filter("text", 1, [](const Bean::Symbol & sym) {
@@ -102,7 +102,7 @@ struct Diff {
 		});
 		cout << ',';
 		print_filter("relro", 1, [](const Bean::Symbol & sym) {
-			return sym.section.flags == Bean::Symbol::Section::SECTION_RELRO;
+			return sym.section.has(Bean::Symbol::Section::SECTION_RELRO);
 		});
 		cout << ',';
 		print_filter("data", 1, [](const Bean::Symbol & sym) {
@@ -110,7 +110,7 @@ struct Diff {
 		});
 		cout << ',';
 		print_filter("bss", 1, [](const Bean::Symbol & sym) {
-			return sym.section.writeable && sym.section.flags == Bean::Symbol::Section::SECTION_NOBITS && !Bean::TLS::is_tls(sym.address);
+			return sym.section.writeable && sym.section.has(Bean::Symbol::Section::SECTION_NOBITS) && !Bean::TLS::is_tls(sym.address);
 		});
 		cout << ',';
 		print_filter("tdata", 1, [](const Bean::Symbol & sym) {
@@ -118,7 +118,7 @@ struct Diff {
 		});
 		cout << ',';
 		print_filter("tbss", 1, [](const Bean::Symbol & sym) {
-			return sym.section.writeable && sym.section.flags == Bean::Symbol::Section::SECTION_NOBITS && Bean::TLS::is_tls(sym.address);
+			return sym.section.writeable && sym.section.has(Bean::Symbol::Section::SECTION_NOBITS) && Bean::TLS::is_tls(sym.address);
 		});
 		cout << endl << '}' << endl;
 	}

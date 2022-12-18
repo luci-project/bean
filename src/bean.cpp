@@ -106,9 +106,12 @@ bool Bean::patchable(const symhash_t & diff) {
 	// TODO: Init sections
 	uint16_t ignore = Symbol::Section::SECTION_RELRO | Symbol::Section::SECTION_EH_FRAME | Symbol::Section::SECTION_DYNAMIC;
 	for (const auto & d : diff)
-		if (d.section.writeable && (d.section.flags & ignore) == 0)
+		if (d.section.writeable && (d.section.flags & ignore) == 0) {
+			cerr << "A " << (void*)d.address << " " << d.size << "B " << d.name << endl;
 			return false;
-		else if ((d.section.flags & Symbol::Section::SECTION_INIT) != 0)
+		} else if (d.section.has(Symbol::Section::SECTION_INIT)) {
+			cerr << "B " << (void*)d.address << " " << d.size << "B " << d.name << endl;
 			return false;
+		}
 	return true;
 }
