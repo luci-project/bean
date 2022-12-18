@@ -23,16 +23,17 @@ class DwarfVars:
 		self.root = root
 		if not os.path.exists(self.file):
 			self.file = os.path.realpath(root + file)
-		if len(root) > 0 and self.filepath.startswith(root):
-			self.filepath = self.filepath[len(root):]
+		if len(root) > 0 and self.file.startswith(root):
+			self.file = self.file[len(root):]
 		self.dbgsym = None
 
-		if not os.path.exists(root + self.file):
-			raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), file)
-		elif self.parse(file):
-			self.dbgsym = file
+		filepath = self.root + self.file
+		if not os.path.exists(filepath):
+			raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), filepath)
+		elif self.parse(filepath):
+			self.dbgsym = filepath
 		elif external_dbgsym:
-			self.dbgsym = DebugSymbol(file, root).find()
+			self.dbgsym = DebugSymbol(filepath, self.root).find()
 
 		# Not found:
 		if not self.dbgsym:
