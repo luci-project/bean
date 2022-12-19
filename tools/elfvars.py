@@ -112,6 +112,11 @@ class ElfVar:
 		elif extern:
 			self.dbgsym = DebugSymbol(self.path, self.root).find(self.debuglink, self.buildid)
 		if self.dbgsym:
+			if not self.comment:
+				with  open(self.dbgsym, "rb") as dbgelf:
+					for section in ELFFile(dbgelf).iter_sections():
+						if section.name == '.comment':
+							self.comment = section.data().split(b'\x00', 1)[0].decode('ascii')
 			self.dwarf = DwarfVars(self.dbgsym, aliases = aliases, names = names)
 
 	def load_segments(self):

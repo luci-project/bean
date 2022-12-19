@@ -34,6 +34,8 @@ class DwarfVars:
 			self.dbgsym = filepath
 		elif external_dbgsym:
 			self.dbgsym = DebugSymbol(filepath, self.root).find()
+			if self.dbgsym:
+				self.parse(self.dbgsym)
 
 		# Not found:
 		if not self.dbgsym:
