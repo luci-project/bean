@@ -17,12 +17,12 @@ struct ElfFile {
 	uintptr_t addr;
 	const Elf content;
 
-	ElfFile(const char * path)
+	ElfFile(const char * path, bool ignore_size = false)
 	  : path(path),
 	    fd(Syscall::open(path, O_RDONLY).value_or_die("Opening file failed")),
 	    size(get_size()),
 	    addr(Syscall::mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0).value_or_die("Mapping file failed")),
-	    content(read_content()) {}
+	    content(read_content(ignore_size)) {}
 
 	~ElfFile() {
 		// Cleanup
@@ -38,7 +38,7 @@ struct ElfFile {
 		return sb.st_size;
 	}
 
-	Elf read_content() const {
+	Elf read_content(bool ignore_size) const {
 		ELF_Ident * ident = reinterpret_cast<ELF_Ident *>(addr);
 		if (size < sizeof(ELF_Ident) || !ident->valid()) {
 			cerr << "No valid ELF identification header!" << endl;
@@ -51,7 +51,7 @@ struct ElfFile {
 			Syscall::exit(EXIT_FAILURE);
 		}
 		Elf elf(reinterpret_cast<uintptr_t>(addr));
-		if (!elf.valid(size)) {
+		if (!elf.valid(ignore_size ? SIZE_MAX : size)) {
 			cerr << "No valid ELF file!" << endl;
 			Syscall::exit(EXIT_FAILURE);
 		}
@@ -94,7 +94,7 @@ struct BeanFile {
 		const char * debug_path = DebugSymbol(path, root).find(binary.content);
 		cerr << "Debug path = " << debug_path <<endl;
 		if (debug_path != nullptr)
-			return new ElfFile(debug_path);
+			return new ElfFile(debug_path, true);
 
 		return nullptr;
 	}
