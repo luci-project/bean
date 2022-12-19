@@ -1,6 +1,13 @@
 #include <bean/bean.hpp>
 
-static const char * bind_str[3] = { "local", "global", "weak" };
+static void dump_bind(BufferStream & bs, Bean::Symbol::Bind bind) {
+	switch (bind) {
+		case Bean::Symbol::BIND_WEAK:   bs << "weak";    break;
+		case Bean::Symbol::BIND_LOCAL:  bs << "local";   break;
+		case Bean::Symbol::BIND_GLOBAL: bs << "global";  break;
+		default:                        bs << "unknown"; break;
+	}
+}
 
 void Bean::Symbol::Identifier::dump(BufferStream& bs) const {
 	bs << '{' << setfill('0') << hex << setw(16) << internal
@@ -20,7 +27,7 @@ void Bean::Symbol::dump_name(BufferStream& bs) const {
 	   << hex << address;
 
 	if (bind != Symbol::BIND_LOCAL)
-		bs << ", " << bind_str[bind];
+		dump_bind(bs << ", ", bind);
 
 	if (section.name != nullptr)
 		bs << ", " << section.name;
@@ -72,7 +79,9 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 			bs << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
 			   << "0x" << setw(16) << setfill('0') << hex << TLS::virt_addr(address)
 			   << dec << setw(7) << setfill(' ') << right << size << ' '
-			   << setw(6) << left << bind_str[bind] << ' '
+			   << setw(6) << left;
+			 dump_bind(bs, bind);
+			bs << ' '
 			   << (section.writeable ? ((section.flags & Symbol::Section::SECTION_RELRO) != 0 ? 'R' : 'W') : ' ') << (section.executable ? 'X' : ' ') << (TLS::is_tls(address) ? 'T' : ' ');
 			if (name != nullptr && name[0] != '\0')
 				bs << ' ' << name;
