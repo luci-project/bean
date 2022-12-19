@@ -329,9 +329,13 @@ struct Bean {
 	const HashSet<Symbol, T> diff(const HashSet<Symbol, T> & other_symbols, bool include_dependencies = false) const {
 		HashSet<Symbol, T> result;
 		for (const auto & sym : symbols)
-			if (!other_symbols.contains(sym) && sym.size > 0 && result.insert(sym).second && include_dependencies)
-				for (const auto d: sym.deps)
-					dependencies(d, result);
+			if (!other_symbols.contains(sym)  // find symbols which hash does not exist in other binary
+			    && sym.size > 0  // ignore symbols without size (they are only markers like __end)
+			    && result.insert(sym).second  // skip if already added
+			    && include_dependencies // check if dependencies should be included
+			)
+				for (const auto address: sym.deps)
+					dependencies(address, result);
 		return result;
 	}
 
@@ -370,7 +374,8 @@ struct Bean {
 	template<class T>
 	void dependencies(uintptr_t address, HashSet<Symbol, T> & result) const {
 		auto sym = symbols.ceil(address);
-		if (sym && result.emplace(*sym).second)
+		// if symbol was found and not yet part of the result list, add and check all symbols depending on this one
+		if (sym && sym->size > 0 && sym->section.executable && result.emplace(*sym).second)
 			for (const auto d: sym->deps)
 				dependencies(d, result);
 	}
