@@ -188,7 +188,8 @@ def build_cell(result, obj, base, hashval, hashdbg, highlight = False):
 					text.append(Text(f"\n {n}:{v}", Style(color=color if changed else None, dim=dim)))
 					if args.verbose > 2 and changed:
 						text.append(Text(f"\n {n}:{hashval[base][k] }", Style(color='light_coral', dim=dim)))
-
+				if 'comment' in hashdbg[obj]:
+					text.append(Text(f"\n.comment:\n {hashdbg[obj]['comment']}", Style(dim=dim)))
 		text.append("\n");
 
 	return text, patchable
@@ -235,7 +236,7 @@ for o in sorted_objs:
 				if len(d) > 0 and d[0]:
 					i = d[0].items()
 					hashval[obj] = {k: v['hash'] for k,v in i if type(v) is dict and 'hash' in v}
-					hashdbg[obj] = {k: v for k, v in i if k.startswith('debug') }
+					hashdbg[obj] = {k: v for k, v in i if k.startswith('debug') or k == 'comment' }
 				else:
 					hashval[obj] = {}
 					hashdbg[obj] = {}

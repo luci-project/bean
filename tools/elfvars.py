@@ -91,12 +91,15 @@ class ElfVar:
 		self.relro = None
 		self.dwarf = None
 
-		# Get build ID and debug link (if available)
+		# Get build ID, debug link and comment (if available)
 		self.buildid = None
 		self.debuglink = None
+		self.comment = None
 		for section in self.elf.iter_sections():
 			if section.name == '.gnu_debuglink':
 				self.debuglink = section.data().split(b'\x00', 1)[0].decode('ascii')
+			elif section.name == '.comment':
+				self.comment = section.data().split(b'\x00', 1)[0].decode('ascii')
 			elif isinstance(section, NoteSection):
 				for note in section.iter_notes():
 					if note['n_type'] == 'NT_GNU_BUILD_ID' and note['n_size'] == 36:
@@ -236,6 +239,8 @@ class ElfVar:
 		if self.dbgsym and self.dwarf:
 			info["debug"] = str(Path(self.dbgsym).relative_to(self.root)) if self.root else self.dbgsym
 			info["debug-incomplete"] = self.dwarf and self.dwarf.incomplete
+		if self.comment:
+			info["comment"] = self.comment
 
 		for cat in sorted(self.categories):
 			if writable_only and not 'W' in cat and cat != 'TLS':
