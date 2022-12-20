@@ -342,12 +342,10 @@ struct Bean {
 		COMPARE_ONLY_INTERNAL = 3
 	};
 
-	const symtree_t diff(const Bean & other, bool include_dependencies = false, ComparisonMode mode = COMPARE_EXTENDED,  bool * patchable = nullptr) const;
+	const symtree_t diff(const Bean & other, bool include_dependencies = false, ComparisonMode mode = COMPARE_EXTENDED) const;
 
-	bool patchable(const Bean & other, bool include_dependencies = false, ComparisonMode mode = COMPARE_EXTENDED) const;
-
-	template<class T>
-	static bool patchable(const HashSet<Symbol, T> & diff) {
+	template<class SYMDIFFLIST>
+	static bool patchable(const SYMDIFFLIST & diff) {
 		uint16_t ignore = Symbol::Section::SECTION_RELRO | Symbol::Section::SECTION_EH_FRAME | Symbol::Section::SECTION_DYNAMIC;
 		for (const auto & d : diff)
 			if (d.section.writeable && (d.section.flags & ignore) == 0)
@@ -355,6 +353,10 @@ struct Bean {
 			else if (d.section.has(Symbol::Section::SECTION_INIT))
 				return false;
 		return true;
+	}
+
+	bool patchable(const Bean & other, bool include_dependencies = false, ComparisonMode mode = COMPARE_EXTENDED) const {
+		return patchable(diff(other, include_dependencies, mode));
 	}
 
 	const Symbol * get(uintptr_t address)  const  {

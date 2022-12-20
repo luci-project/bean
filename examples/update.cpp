@@ -85,8 +85,7 @@ int main(int argc, const char *argv[]) {
 	BeanFile old_file(old_path, dbgsym, reloc, verbose >= Bean::DEBUG, old_base);
 	BeanFile new_file(new_path == nullptr ? old_path : new_path, dbgsym, reloc, verbose >= Bean::DEBUG, new_base == nullptr ? old_base : new_base);
 
-	bool patchable = false;
-	auto & diff = new_file.bean.diff(old_file.bean, dependencies, comparison_mode, &patchable);
+	auto & diff = new_file.bean.diff(old_file.bean, dependencies, comparison_mode);
 
 	cout << "# Changes at update of "
 	     << old_file.binary.path << " (" << old_file.binary.size << " bytes) with "
@@ -94,7 +93,7 @@ int main(int argc, const char *argv[]) {
 	Bean::dump(cout, diff, verbose);
 	cout << endl;
 
-	if (patchable) {
+	if (Bean::patchable(diff)) {
 		return EXIT_SUCCESS;
 	} else {
 		cerr << "# Critical sections have changed - not updateable..." << endl;

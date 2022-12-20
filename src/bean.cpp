@@ -80,86 +80,39 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 		}
 }
 
-
-const Bean::symtree_t Bean::diff(const Bean & other, bool include_dependencies, Bean::ComparisonMode mode, bool * patchable) const {
+const Bean::symtree_t Bean::diff(const Bean & other, bool include_dependencies, Bean::ComparisonMode mode) const {
 	switch (mode) {
 		case Bean::COMPARE_EXTENDED:
-		{
-			auto e = diff_extended(other, include_dependencies);
-
-			if (patchable != nullptr)
-				*patchable = Bean::patchable(e);
-
-			return symtree_t(e);
-		}
+			return symtree_t(diff_extended(other, include_dependencies));
 
 		case Bean::COMPARE_WRITEABLE_INTERNAL:
 		{
-			auto e = diff_extended(other, include_dependencies, [](const Symbol & sym){ return !sym.section.writeable; });
-			auto i = diff_internal(other, include_dependencies, [](const Symbol & sym){ return sym.section.writeable; });
-
-			if (patchable != nullptr)
-				*patchable = Bean::patchable(e) && Bean::patchable(i);
-
-			symtree_t r(e);
-			for (auto & s : i)
-				r.emplace(s);
+			syminthash_t i(other.symbols);
+			symtree_t r;
+			for (auto & s : diff_extended(other, include_dependencies))
+				if (!s.section.writeable || !i.contains(s))
+					r.emplace(s);
 
 			return r;
 		}
 
 		case Bean::COMPARE_EXECUTABLE_EXTENDED:
 		{
-			auto e = diff_extended(other, include_dependencies, [](const Symbol & sym){ return sym.section.executable; });
-			auto i = diff_internal(other, include_dependencies, [](const Symbol & sym){ return !sym.section.executable; });
-
-			if (patchable != nullptr)
-				*patchable = Bean::patchable(e) && Bean::patchable(i);
-
-			symtree_t r(e);
-			for (auto & s : i)
-				r.emplace(s);
+			syminthash_t i(other.symbols);
+			symtree_t r;
+			for (auto & s : diff_extended(other, include_dependencies))
+				if (s.section.executable || !i.contains(s))
+					r.emplace(s);
 
 			return r;
 		}
 
 		case Bean::COMPARE_ONLY_INTERNAL:
-		{
-			auto i = diff_internal(other, include_dependencies);
-
-			if (patchable != nullptr)
-				*patchable = Bean::patchable(i);
-
-			return symtree_t(i);
-		}
+			return symtree_t(diff_internal(other, include_dependencies));
 
 		default:
-			if (patchable != nullptr)
-				*patchable = false;
-
+			assert(false);
 			return symtree_t();
-	}
-}
-
-bool Bean::patchable(const Bean & other, bool include_dependencies, ComparisonMode mode) const {
-	switch (mode) {
-		case Bean::COMPARE_EXTENDED:
-			return patchable(diff_extended(other, include_dependencies));
-
-		case Bean::COMPARE_WRITEABLE_INTERNAL:
-			return patchable(diff_internal(other, include_dependencies, [](const Symbol & sym){ return sym.section.writeable; }))
-			    && patchable(diff_extended(other, include_dependencies, [](const Symbol & sym){ return !sym.section.writeable; }));
-
-		case Bean::COMPARE_EXECUTABLE_EXTENDED:
-			return patchable(diff_internal(other, include_dependencies, [](const Symbol & sym){ return !sym.section.executable; }))
-				&& patchable(diff_extended(other, include_dependencies, [](const Symbol & sym){ return sym.section.executable; }));
-
-		case Bean::COMPARE_ONLY_INTERNAL:
-			return patchable(diff_internal(other, include_dependencies));
-
-		default:
-			return false;
-
 	}
 }
 

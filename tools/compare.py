@@ -43,8 +43,6 @@ parser.add_argument('-v', '--verbose', action='count', help="Set verbosity level
 args = parser.parse_args()
 if args.internal > 3:
 	args.internal = 3
-if args.verbose > 3:
-	args.verbose = 3
 
 base=Path(args.base)
 
@@ -128,7 +126,7 @@ def add_details(text, data, section, dim):
 		text.append(Text("\n   {count}: {size}B".format_map(data['total']), Style(italic=not changed, color='white' if changed else None, dim=dim)))
 		if args.verbose > 3:
 			if data['changed-internal']['added']['size'] != 0:
-				text.append(Text("\n(+ {count}:  {size}B)".format_map(data['changed-internal']['added']), Style(color='light_green', dim=dim)))
+				text.append(Text("\n(+ {count}: {size}B)".format_map(data['changed-internal']['added']), Style(color='light_green', dim=dim)))
 			if data['changed-internal']['removed']['size'] != 0:
 				text.append(Text("\n(- {count}: {size}B)".format_map(data['changed-internal']['removed']), Style(color='light_coral', dim=dim)))
 		if args.verbose > 2:
