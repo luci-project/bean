@@ -5,6 +5,7 @@
 
 int main(int argc, const char *argv[]) {
 	Bean::Verbosity verbose = Bean::NONE;
+	Bean::ComparisonMode comparison_mode = Bean::COMPARE_EXTENDED;
 
 	bool dependencies = false;
 	bool dbgsym = false;
@@ -31,6 +32,15 @@ int main(int argc, const char *argv[]) {
 			} else {
 				cerr << "Invalid third base parameter " << argv[++i] << endl;
 				return EXIT_FAILURE;
+			}
+		} else if (String::compare(argv[i], "-i", 2) == 0) {
+			for (size_t j = 1; argv[i][j] != '\0'; j++) {
+				if (argv[i][j] == 'i') {
+					comparison_mode = static_cast<Bean::ComparisonMode>(1 + static_cast<uint8_t>(comparison_mode));
+				} else {
+					cerr << "Unsupported parameter '" << argv[i] << endl;
+					return EXIT_FAILURE;
+				}
 			}
 		} else if (String::compare(argv[i], "-v", 2) == 0) {
 			for (size_t j = 1; argv[i][j] != '\0'; j++) {
@@ -62,6 +72,9 @@ int main(int argc, const char *argv[]) {
 		     << "  -s    use (external) debug symbols" << endl
 		     << "  -b    base directory to search for debug files" << endl
 		     << "        (if this is set a second time, it will be used for the second [new] binary)"
+		     << "  -i    do not check writeable section with external ID (only internal one) " << endl
+		     << "  -ii   do only check executable sections with both IDs, use internal ID for everything else" << endl
+		     << "  -iii  rely on internal ID only for comparison (and ignore external one)" << endl
 		     << "  -v    list address and names" << endl
 		     << "  -vv   ... and dissassemble code" << endl
 		     << "  -vvv  ... and show all references and relocations" << endl;
@@ -71,13 +84,13 @@ int main(int argc, const char *argv[]) {
 	BeanFile old_file(old_path, dbgsym, reloc, verbose >= Bean::DEBUG, old_base);
 	BeanFile new_file(new_path == nullptr ? old_path : new_path, dbgsym, reloc, verbose >= Bean::DEBUG, new_base == nullptr ? old_base : new_base);
 
-	auto & diff = new_file.bean.diff(old_file.bean, dependencies);
+	auto diff = new_file.bean.diff(old_file.bean, dependencies, comparison_mode);
 
 	if (verbose == Bean::NONE)
 		Bean::dump(cout, diff);
 	else {
 		Bean::Symbol::dump_header(cout << ' ', verbose);
-		auto removed = Bean::symtree_t(old_file.bean.diff(new_file.bean, dependencies));
+		auto removed = old_file.bean.diff(new_file.bean, dependencies, comparison_mode);
 		auto rnext = removed.begin();
 		for (const auto & n : new_file.bean) {
 			while (rnext != removed.end() && rnext->address <= n.address) {

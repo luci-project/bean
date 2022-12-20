@@ -9,13 +9,17 @@ struct Diff {
 	BeanFile a_file, b_file;
 	BuildID a_buildid, b_buildid;
 	Bean::syminthash_t a_internal, b_internal;
-	Bean::symhash_t a_external, b_external;
+	Bean::symhash_t a_extended, b_extended;
+	bool include_dependencies;
+	bool resolve_internal_relocations;
+	Bean::ComparisonMode comparison_mode;
 
-	Diff(const char * a_base, const char * a_path, const char * b_base, const char * b_path, bool dbgsym, bool reloc, bool dependencies) :
+	Diff(const char * a_base, const char * a_path, const char * b_base, const char * b_path, bool dbgsym, bool reloc, bool dependencies, Bean::ComparisonMode comparison_mode) :
 		a_file(a_path, dbgsym, reloc, false, a_base), b_file(b_path == nullptr ? a_path : b_path , dbgsym, reloc, false, b_base == nullptr ? a_base : b_base),
 		a_buildid(a_file.binary.content), b_buildid(b_file.binary.content),
 		a_internal(a_file.bean.diff_internal(b_file.bean, dependencies)), b_internal(b_file.bean.diff_internal(a_file.bean, dependencies)),
-		a_external(a_file.bean.diff(b_file.bean, dependencies)), b_external(b_file.bean.diff(a_file.bean, dependencies)) {
+		a_extended(a_file.bean.diff_extended(b_file.bean, dependencies)), b_extended(b_file.bean.diff_extended(a_file.bean, dependencies)),
+		include_dependencies(dependencies), resolve_internal_relocations(reloc), comparison_mode(comparison_mode) {
 		assert(b_base != nullptr || b_path != nullptr);
 	}
 
@@ -62,10 +66,10 @@ struct Diff {
 		print_startline(depth + 1);
 		cout << "},";
 		print_startline(depth + 1);
-		cout << "\"changed-external\": {";
-		print_count("added", depth + 2, count(b_external, filter));
+		cout << "\"changed-extended\": {";
+		print_count("added", depth + 2, count(b_extended, filter));
 		cout << ',';
-		print_count("removed", depth + 2, count(a_external, filter));
+		print_count("removed", depth + 2, count(a_extended, filter));
 		print_startline(depth + 1);
 		cout << '}';
 		print_startline(depth);
@@ -76,7 +80,24 @@ struct Diff {
 	void print() {
 		cout << '{';
 		print_startline(1);
-		cout << "\"patchable\": " << Bean::patchable(b_external) << ',';
+		cout << "\"patchable\": " << b_file.bean.patchable(a_file.bean, include_dependencies, comparison_mode) << ',';
+		print_startline(1);
+		cout << "\"settings\": {";
+		print_startline(2);
+		cout << "\"resolve_internal_relocations\": \"" << resolve_internal_relocations << "\",";
+		print_startline(2);
+		cout << "\"include_dependencies\": \"" << include_dependencies << "\",";
+		print_startline(2);
+		cout << "\"comparison_mode\": ";
+		switch (comparison_mode) {
+			case Bean::COMPARE_EXTENDED: cout << "\"COMPARE_EXTENDED\""; break;
+			case Bean::COMPARE_WRITEABLE_INTERNAL: cout << "\"COMPARE_WRITEABLE_INTERNAL\""; break;
+			case Bean::COMPARE_EXECUTABLE_EXTENDED: cout << "\"COMPARE_EXECUTABLE_EXTENDED\""; break;
+			case Bean::COMPARE_ONLY_INTERNAL:  cout << "\"COMPARE_ONLY_INTERNAL\""; break;
+			default: cout << "null";
+		}
+		print_startline(1);
+		cout << "},";
 		print_startline(1);
 		cout << "\"build-id\": {";
 		print_startline(2);
@@ -125,6 +146,7 @@ struct Diff {
 };
 
 int main(int argc, const char *argv[]) {
+	Bean::ComparisonMode comparison_mode = Bean::COMPARE_EXTENDED;
 	bool dependencies = false;
 	bool dbgsym = false;
 	bool reloc = false;
@@ -142,6 +164,15 @@ int main(int argc, const char *argv[]) {
 			dbgsym = true;
 		} else if (String::compare(argv[i], "-r") == 0) {
 			reloc = true;
+		} else if (String::compare(argv[i], "-i", 2) == 0) {
+			for (size_t j = 1; argv[i][j] != '\0'; j++) {
+				if (argv[i][j] == 'i') {
+					comparison_mode = static_cast<Bean::ComparisonMode>(1 + static_cast<uint8_t>(comparison_mode));
+				} else {
+					cerr << "Unsupported parameter '" << argv[i] << endl;
+					return EXIT_FAILURE;
+				}
+			}
 		} else if (String::compare(argv[i], "-b") == 0) {
 			if (old_base == nullptr) {
 				old_base = argv[++i];
@@ -170,12 +201,15 @@ int main(int argc, const char *argv[]) {
 		     << "  -r    resolve (internal) relocations" << endl
 		     << "  -d    include dependencies" << endl
 		     << "  -s    use (external) debug symbols" << endl
+		     << "  -i    do not check writeable section with external ID (only internal one) " << endl
+		     << "  -ii   do only check executable sections with both IDs, use internal ID for everything else" << endl
+		     << "  -iii  rely on internal ID only for comparison (and ignore external one)" << endl
 		     << "  -b    base directory to search for debug files" << endl
 		     << "        (if this is set a second time, it will be used for the second [new] binary)" << endl;
 		return EXIT_FAILURE;
 	}
 
-	Diff(old_base, old_path, new_base, new_path, dbgsym, reloc, dependencies).print();
+	Diff(old_base, old_path, new_base, new_path, dbgsym, reloc, dependencies, comparison_mode).print();
 
 	return EXIT_SUCCESS;
 }

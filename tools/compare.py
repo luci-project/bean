@@ -36,10 +36,15 @@ parser.add_argument('-r', '--relocations', action='store_true', help='resolve in
 parser.add_argument('-D', '--verdir', help='filter version directories (by regex)', nargs='*')
 parser.add_argument('-o', '--output', type=argparse.FileType('w'), help='export output to file[s] (html/svg/text)', nargs='*')
 parser.add_argument('-n', '--nproc', type=int, help="Number of worker Threads", default=None)
-parser.add_argument('-v', '--verbose', action='count', default=0)
+parser.add_argument('-i', '--internal', action='count', help="Set comparison mode (use only internal ID for writeable section, all except executable sections or for all sections). Without flag extended check (internal and external ID) is used", default=0)
+parser.add_argument('-v', '--verbose', action='count', help="Set verbosity level", default=0)
 
 
 args = parser.parse_args()
+if args.internal > 3:
+	args.internal = 3
+if args.verbose > 3:
+	args.verbose = 3
 
 base=Path(args.base)
 
@@ -114,7 +119,7 @@ def exec_json(*args):
 		return {}
 
 def add_details(text, data, section, dim):
-	changed = data['changed-external']['added']['size'] != 0 or data['changed-external']['removed']['size'] != 0
+	changed = data['changed-extended']['added']['size'] != 0 or data['changed-extended']['removed']['size'] != 0
 	highlight = section in [ 'bss', 'data', 'tdata', 'tbss', 'init' ];
 	if args.verbose > 1 or (args.verbose == 1 and changed):
 		text.append(Text(f"\n.{section}", Style(italic=not changed, color='white' if changed else None, dim=dim, bold=highlight)))
@@ -127,10 +132,10 @@ def add_details(text, data, section, dim):
 			if data['changed-internal']['removed']['size'] != 0:
 				text.append(Text("\n(- {count}: {size}B)".format_map(data['changed-internal']['removed']), Style(color='light_coral', dim=dim)))
 		if args.verbose > 2:
-			if data['changed-external']['added']['size'] != 0:
-				text.append(Text("\n + {count}: {size}B".format_map(data['changed-external']['added']), Style(color='light_green', dim=dim)))
-			if data['changed-external']['removed']['size'] != 0:
-				text.append(Text("\n - {count}: {size}B".format_map(data['changed-external']['removed']), Style(color='light_coral', dim=dim)))
+			if data['changed-extended']['added']['size'] != 0:
+				text.append(Text("\n + {count}: {size}B".format_map(data['changed-extended']['added']), Style(color='light_green', dim=dim)))
+			if data['changed-extended']['removed']['size'] != 0:
+				text.append(Text("\n - {count}: {size}B".format_map(data['changed-extended']['removed']), Style(color='light_coral', dim=dim)))
 
 
 def build_cell(result, obj, base, hashval, hashdbg, highlight = False):
@@ -215,6 +220,8 @@ for o in sorted_objs:
 				diffflags = (*diffflags, '-d')
 			if args.relocations:
 				diffflags = (*diffflags, '-r')
+			if args.internal > 0:
+				diffflags = (*diffflags, '-'+'i'*args.internal)
 
 			for a in sorted_dirs:
 				elfvars[str(a.name)] = pool.apply_async(exec_json, (args.hashtool, '-b', str(a), '-d', '-w', '-D', '-t',  str(a.joinpath(o))), callback=lambda r : progress.advance(task))
@@ -266,7 +273,8 @@ for o in sorted_objs:
 
 	console.print(table, end='\n')
 	summary = f"For [b]{str(o.name)}[/b], [light_green]{patchcount}[/light_green] of {len(sorted_dirs) - 1} versions ([light_green]{round(100*patchcount/(len(sorted_dirs) - 1))}%[/light_green]) can be live patched"
-	settings = []
+	comparison_mode = [ 'default (extended) comparison', 'internal ID comparison of writable section', 'internal ID comparison of all except executable sections', 'internal ID comparison' ]
+	settings = [ comparison_mode[args.internal] ]
 	if args.dependencies:
 		settings.append("recusive symbol dependency checks")
 	if args.relocations:

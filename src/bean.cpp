@@ -81,37 +81,88 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 }
 
 
+const Bean::symtree_t Bean::diff(const Bean & other, bool include_dependencies, Bean::ComparisonMode mode, bool * patchable) const {
+	switch (mode) {
+		case Bean::COMPARE_EXTENDED:
+		{
+			auto e = diff_extended(other, include_dependencies);
+
+			if (patchable != nullptr)
+				*patchable = Bean::patchable(e);
+
+			return symtree_t(e);
+		}
+
+		case Bean::COMPARE_WRITEABLE_INTERNAL:
+		{
+			auto e = diff_extended(other, include_dependencies, [](const Symbol & sym){ return !sym.section.writeable; });
+			auto i = diff_internal(other, include_dependencies, [](const Symbol & sym){ return sym.section.writeable; });
+
+			if (patchable != nullptr)
+				*patchable = Bean::patchable(e) && Bean::patchable(i);
+
+			symtree_t r(e);
+			for (auto & s : i)
+				r.emplace(s);
+
+			return r;
+		}
+
+		case Bean::COMPARE_EXECUTABLE_EXTENDED:
+		{
+			auto e = diff_extended(other, include_dependencies, [](const Symbol & sym){ return sym.section.executable; });
+			auto i = diff_internal(other, include_dependencies, [](const Symbol & sym){ return !sym.section.executable; });
+
+			if (patchable != nullptr)
+				*patchable = Bean::patchable(e) && Bean::patchable(i);
+
+			symtree_t r(e);
+			for (auto & s : i)
+				r.emplace(s);
+
+			return r;
+		}
+
+		case Bean::COMPARE_ONLY_INTERNAL:
+		{
+			auto i = diff_internal(other, include_dependencies);
+
+			if (patchable != nullptr)
+				*patchable = Bean::patchable(i);
+
+			return symtree_t(i);
+		}
+
+		default:
+			if (patchable != nullptr)
+				*patchable = false;
+
+			return symtree_t();
+	}
+}
+
+bool Bean::patchable(const Bean & other, bool include_dependencies, ComparisonMode mode) const {
+	switch (mode) {
+		case Bean::COMPARE_EXTENDED:
+			return patchable(diff_extended(other, include_dependencies));
+
+		case Bean::COMPARE_WRITEABLE_INTERNAL:
+			return patchable(diff_internal(other, include_dependencies, [](const Symbol & sym){ return sym.section.writeable; }))
+			    && patchable(diff_extended(other, include_dependencies, [](const Symbol & sym){ return !sym.section.writeable; }));
+
+		case Bean::COMPARE_EXECUTABLE_EXTENDED:
+			return patchable(diff_internal(other, include_dependencies, [](const Symbol & sym){ return !sym.section.executable; }))
+				&& patchable(diff_extended(other, include_dependencies, [](const Symbol & sym){ return sym.section.executable; }));
+
+		case Bean::COMPARE_ONLY_INTERNAL:
+			return patchable(diff_internal(other, include_dependencies));
+
+		default:
+			return false;
+
+	}
+}
+
 Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, const ELF<ELF_Def::Identification::ELFCLASS32> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) : symbols(analyze(elf, dbgsym, resolve_internal_relocations, debug, buffer_size)) {}
 
 Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, const ELF<ELF_Def::Identification::ELFCLASS64> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) : symbols(analyze(elf, dbgsym, resolve_internal_relocations, debug, buffer_size)) {}
-
-/*! \brief Merge memory areas */
-const Bean::memarea_t Bean::merge(const symtree_t & symbols, size_t threshold) const {
-	memarea_t area;
-	for (const auto & sym : symbols) {
-		if (!area.empty()) {
-			auto & last = area.back();
-			if (last.writeable == sym.section.writeable && last.executable == sym.section.executable && last.flags == sym.section.flags && last.address + last.size + threshold >= sym.address) {
-				last.size = sym.address + sym.size - last.address;
-				continue;
-			}
-		}
-		area.emplace_back(sym.address, sym.size, sym.section.writeable, sym.section.executable, sym.section.flags);
-	}
-	return area;
-}
-
-
-bool Bean::patchable(const symhash_t & diff) {
-	// TODO: Init sections
-	uint16_t ignore = Symbol::Section::SECTION_RELRO | Symbol::Section::SECTION_EH_FRAME | Symbol::Section::SECTION_DYNAMIC;
-	for (const auto & d : diff)
-		if (d.section.writeable && (d.section.flags & ignore) == 0) {
-			cerr << "A " << (void*)d.address << " " << d.size << "B " << d.name << endl;
-			return false;
-		} else if (d.section.has(Symbol::Section::SECTION_INIT)) {
-			cerr << "B " << (void*)d.address << " " << d.size << "B " << d.name << endl;
-			return false;
-		}
-	return true;
-}

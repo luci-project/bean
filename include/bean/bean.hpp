@@ -307,29 +307,13 @@ struct Bean {
 
 	static symtree_t::ConstIterator dump_address(BufferStream & bs, uintptr_t value, const symtree_t & symbols);
 
-	/*! \brief Merge memory areas */
-	const memarea_t merge(const symtree_t & symbols, size_t threshold = 0) const;
-
-	/*! \brief Merge memory areas
-	 * \note ids and names will be removed
-	 */
-	const memarea_t merge(const symhash_t & symbols, size_t threshold = 0) const {
-		return merge(symtree_t(symbols), threshold);
-	}
-
-	const memarea_t diffmerge(const symhash_t & other_symbols, bool include_dependencies = false, size_t threshold = 0) const {
-		return merge(diff(other_symbols, include_dependencies), threshold);
-	}
-
-	const memarea_t diffmerge(const Bean & other, bool include_dependencies = false, size_t threshold = 0) const {
-		return merge(diff(other, include_dependencies), threshold);
-	}
-
 	template<class T>
-	const HashSet<Symbol, T> diff(const HashSet<Symbol, T> & other_symbols, bool include_dependencies = false) const {
+	const HashSet<Symbol, T> diff(const HashSet<Symbol, T> & other_symbols, bool include_dependencies = false, bool (*skip)(const Symbol &) = nullptr) const {
 		HashSet<Symbol, T> result;
 		for (const auto & sym : symbols)
-			if (!other_symbols.contains(sym)  // find symbols which hash does not exist in other binary
+			if (skip != nullptr && skip(sym))
+				continue;
+			else if (!other_symbols.contains(sym)  // find symbols which hash does not exist in other binary
 			    && sym.size > 0  // ignore symbols without size (they are only markers like __end)
 			    && result.insert(sym).second  // skip if already added
 			    && include_dependencies // check if dependencies should be included
@@ -339,18 +323,38 @@ struct Bean {
 		return result;
 	}
 
-	const symhash_t diff(const Bean & other, bool include_dependencies = false) const {
-		return diff(symhash_t(other.symbols), include_dependencies);
+	const symhash_t diff_extended(const Bean & other, bool include_dependencies = false, bool (*skip)(const Symbol &) = nullptr) const {
+		return diff(symhash_t(other.symbols), include_dependencies, skip);
 	}
 
-	const syminthash_t diff_internal(const Bean & other, bool include_dependencies = false) const {
-		return diff(syminthash_t(other.symbols), include_dependencies);
+	const syminthash_t diff_internal(const Bean & other, bool include_dependencies = false, bool (*skip)(const Symbol &) = nullptr) const {
+		return diff(syminthash_t(other.symbols), include_dependencies, skip);
 	}
 
-	static bool patchable(const symhash_t & diff);
+	enum ComparisonMode {
+		// Check both internal and extrnal hash, for all symbols
+		COMPARE_EXTENDED = 0,
+		// Check both internal and extrnal hash, except for writable symbols (use only internal for them)
+		COMPARE_WRITEABLE_INTERNAL = 1,
+		// Check only internal hash, except for executable section (use both for them)
+		COMPARE_EXECUTABLE_EXTENDED = 2,
+		// Check only internal hash, for all symbols
+		COMPARE_ONLY_INTERNAL = 3
+	};
 
-	bool patchable(const Bean & other, bool include_dependencies = false) const {
-		return patchable(diff(other, include_dependencies));
+	const symtree_t diff(const Bean & other, bool include_dependencies = false, ComparisonMode mode = COMPARE_EXTENDED,  bool * patchable = nullptr) const;
+
+	bool patchable(const Bean & other, bool include_dependencies = false, ComparisonMode mode = COMPARE_EXTENDED) const;
+
+	template<class T>
+	static bool patchable(const HashSet<Symbol, T> & diff) {
+		uint16_t ignore = Symbol::Section::SECTION_RELRO | Symbol::Section::SECTION_EH_FRAME | Symbol::Section::SECTION_DYNAMIC;
+		for (const auto & d : diff)
+			if (d.section.writeable && (d.section.flags & ignore) == 0)
+				return false;
+			else if (d.section.has(Symbol::Section::SECTION_INIT))
+				return false;
+		return true;
 	}
 
 	const Symbol * get(uintptr_t address)  const  {
