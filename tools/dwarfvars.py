@@ -378,6 +378,38 @@ class DwarfVars:
 					if size > 0:
 						yield cdef, size, DIE
 
+	def iter_func(self, only_external = False):
+		type_tags = []
+		for DIEs in self.DIEs:
+			for ID, DIE in DIEs.items():
+				if 'declaration' in DIE and DIE['declaration'][:3] == 'yes':
+					continue
+				elif only_external and not ('external' in DIE and DIE['external'][:3] == 'yes'):
+					continue
+				elif DIE['tag'] == 'subprogram':
+					if 'linkage_name' in DIE:
+						name = DIE['linkage_name']
+					elif 'name' in DIE:
+						name = DIE['name']
+					else:
+						continue
+					full_hash = xxhash.xxh64()
+
+					ret = 'void'
+					if 'type' in DIE:
+						ret, size, hash = self.get_type(self.DIEs[DIE['unit']][DIE['type']])
+						full_hash.update(hash)
+
+					full_hash.update(name)
+
+					params = []
+					for param in self.iter_children(DIE):
+						if param['tag'] == 'formal_parameter':
+							type, size, hash = self.get_type(param)
+							full_hash.update(hash)
+							params.append(type)
+					yield name, f"{ret} {name}({', '.join(params)})", full_hash.hexdigest()
+
 if __name__ == '__main__':
 
 	def dir_path(string):
@@ -401,7 +433,9 @@ if __name__ == '__main__':
 	parser_var.add_argument('-t', '--tls', action='store_true', help='Extract TLS variables')
 	parser_var.add_argument('-j', '--json', action='store_true', help='Output as JSON')
 	parser_data = subparsers.add_parser('datatypes', help='All data types (struct, union, enum) from file')
-	parser_data = subparsers.add_parser('globals', help='All global data types')
+	parser_glob = subparsers.add_parser('globals', help='All global data types')
+	parser_func = subparsers.add_parser('functions', help='All functions')
+	parser_func.add_argument('-e', '--extern', action='store_true', help='Only external functions')
 	args = parser.parse_args()
 
 	if not os.path.exists(args.file):
@@ -428,3 +462,6 @@ if __name__ == '__main__':
 	elif args.extract == 'globals':
 		for cdef, size, DIE in dwarf.iter_globals():
 			print(f"{cdef};  // {size} bytes")
+	elif args.extract == 'functions':
+		for name, decl, hash in dwarf.iter_func(args.extern):
+			print(f"{decl} # {hash}")

@@ -182,7 +182,8 @@ def build_cell(result, obj, base, hashval, hashdbg, highlight = False):
 				text.append(Text(f"\n.debug{hashstatus}", Style(italic=hashsuccess, color='white' if not hashsuccess else None, dim=dim, bold=True)))
 			if args.verbose > 1:
 				for k,v in hashval[obj].items():
-					n = 'dt' if k == 'datatypes' else k
+					key_map = { 'datatypes': 'dt', 'functions': 'fn' };
+					n = key_map[k] if k in key_map else k
 					changed = k in hashval[base] and hashval[base][k] != v
 					color = 'light_green' if args.verbose > 2 else 'white'
 					text.append(Text(f"\n {n}:{v}", Style(color=color if changed else None, dim=dim)))

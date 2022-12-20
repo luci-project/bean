@@ -156,7 +156,6 @@ class ElfVar:
 			if isinstance(section, SymbolTableSection):
 				for sym in section.iter_symbols():
 					if sym['st_shndx'] != 'SHN_UNDEF' and sym['st_info']['type'] in [ 'STT_OBJECT', 'STT_TLS' ] and sym['st_size'] > 0:
-						extern = True if sym['st_info']['bind'] == 'STB_GLOBAL' else False
 						segment = self.segments[self.sec2seg[sym['st_shndx']]]
 						if self.relro and 'W' in segment['category'] and sym['st_value'] >= self.relro['value'] and sym['st_value'] + sym['st_size'] < self.relro['value'] + self.relro['size']:
 							segment = self.relro
@@ -193,7 +192,29 @@ class ElfVar:
 
 		return dwarfsyms
 
-	def summary(self, datatypes = True, writable_only = False, names = True, verbose = False):
+
+	def functions(self):
+		names = []
+		for section in self.elf.iter_sections():
+			if isinstance(section, SymbolTableSection):
+				for sym in section.iter_symbols():
+					if sym['st_shndx'] != 'SHN_UNDEF' and sym['st_info']['type'] in [ 'STT_FUNC' ] and sym['st_size'] > 0 and sym['st_info']['bind'] == 'STB_GLOBAL':
+						names.append(sym.name)
+		return sorted(names)
+
+
+	def functions_debug(self, filter = []):
+		decls = {}
+		for name, decl, hash in self.dwarf.iter_func(only_external = True):
+			if len(filter) > 0 and not name in filter:
+				continue
+			else:
+				decls[name] = decl
+
+		return [ decls[k] for k in sorted(decls) ]
+
+
+	def summary(self, datatypes = True, functions = True, writable_only = False, names = True, verbose = False):
 		symbols = self.symbols()
 		variables = []
 		if self.dbgsym and self.dwarf:
@@ -292,6 +313,23 @@ class ElfVar:
 					hash.update(t['hash'])
 				info["datatypes"]["hash"] = hash.hexdigest()
 
+		if functions:
+			funcs = self.functions()
+			if self.dwarf:
+				funcs = self.functions_debug(filter = funcs)
+
+			if len(funcs) > 0:
+				hash = xxhash.xxh64()
+
+				info["functions"] = {}
+				if verbose:
+					info["functions"]["details"] = []
+				for f in funcs:
+					if verbose:
+						info["functions"]["details"].append(f)
+					hash.update(f)
+				info["functions"]["hash"] = hash.hexdigest()
+
 		return info
 
 def get_cache_key(buildid, args):
@@ -307,7 +345,7 @@ def get_data(file, args, cache):
 			elf.load_segments()
 			if args.dbgsym:
 				elf.load_debug_symbols(args.dbgsym_extern, args.aliases, args.names)
-			result = elf.summary(args.datatypes, args.writable, args.names, args.verbose)
+			result = elf.summary(datatypes = args.datatypes, writable_only = args.writable, names = args.names, verbose = args.verbose)
 			if args.cache:
 				cache[key] = result
 			return result
@@ -395,6 +433,7 @@ if __name__ == '__main__':
 	parser.add_argument('-D', '--dbgsym_extern', action='store_true', help='use external debug symbols (implies -d)')
 	parser.add_argument('-b', '--base', type=dir_path, help='Path prefix for debug symbol files', default='')
 	parser.add_argument('-t', '--datatypes', action='store_true', help='Hash datatypes (requires debug symbols)')
+	parser.add_argument('-f', '--functions', action='store_true', help='Hash API (global) functions')
 	parser.add_argument('-w', '--writable', action='store_true', help='Ignore non-writable sections')
 	parser.add_argument('-i', '--identical', action='store_true', help='Check if hashes of input files are identical')
 	parser.add_argument('-n', '--names', action='store_true', help='Include names (complex types / members)')
