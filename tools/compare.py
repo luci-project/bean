@@ -222,7 +222,7 @@ for o in sorted_objs:
 				diffflags = (*diffflags, '-'+'i'*args.internal)
 
 			for a in sorted_dirs:
-				elfvars[str(a.name)] = pool.apply_async(exec_json, (args.hashtool, '-b', str(a), '-d', '-w', '-D', '-t',  str(a.joinpath(o))), callback=lambda r : progress.advance(task))
+				elfvars[str(a.name)] = pool.apply_async(exec_json, (args.hashtool, '-b', str(a), '-d', '-w', '-D', '-t', '-f',  str(a.joinpath(o))), callback=lambda r : progress.advance(task))
 				if args.matrix:
 					tmpdiff={}
 					for b in sorted_dirs:

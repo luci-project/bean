@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ELFVARSARGS=( '-d' '-D' '-t' '-w' '-p' )
+ELFVARSARGS=( '-d' '-D' '-t' '-f' '-w' '-p' )
 CACHEPREFIX=".elfvarsd-cache"
 DEFAULTSOCKET="0.0.0.0:9001"
 

@@ -41,6 +41,14 @@ class DwarfVars:
 		if not self.dbgsym:
 			raise FileNotFoundError(errno.ENOENT, "No Debug Information available", file)
 
+	def resolve_abstract_origin(self, unit, ID):
+		if 'abstract_origin' in self.DIEs[unit][ID]:
+			aID = self.DIEs[unit][ID]['abstract_origin']
+			del self.DIEs[unit][ID]['abstract_origin']
+			self.resolve_abstract_origin(unit, aID)
+			a = self.DIEs[unit][aID]
+			s = self.DIEs[unit][ID]
+			self.DIEs[unit][ID] = { **a , **s  }
 
 	def parse(self, file):
 		entries = regex.compile(r'^<(\d+)><(0x[0-9a-f]+)(?:\+0x[0-9a-f]+)?><([^>]+)>(.*)$')
@@ -109,6 +117,11 @@ class DwarfVars:
 
 				DIE['unit'] = unit
 				self.DIEs[unit][ID] = DIE
+
+		for unit, DIEs in enumerate(self.DIEs):
+			for ID, DIE in DIEs.items():
+				self.resolve_abstract_origin(unit, ID)
+
 		return len(self.DIEs) > 0
 
 	def get_die(self, unit, type):
@@ -408,7 +421,9 @@ class DwarfVars:
 							type, size, hash = self.get_type(param)
 							full_hash.update(hash)
 							params.append(type)
-					yield name, f"{ret} {name}({', '.join(params)})", full_hash.hexdigest()
+
+					addr = DIE['low_pc'] if 'low_pc' in DIE else 0
+					yield name, addr, ret, ', '.join(params), full_hash.hexdigest()
 
 if __name__ == '__main__':
 
@@ -463,5 +478,5 @@ if __name__ == '__main__':
 		for cdef, size, DIE in dwarf.iter_globals():
 			print(f"{cdef};  // {size} bytes")
 	elif args.extract == 'functions':
-		for name, decl, hash in dwarf.iter_func(args.extern):
-			print(f"{decl} # {hash}")
+		for name, addr, ret, params, hash in dwarf.iter_func(args.extern):
+			print(f"{ret} {name}({params}) # {hash}")

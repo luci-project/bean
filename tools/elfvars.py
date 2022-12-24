@@ -198,23 +198,26 @@ class ElfVar:
 		for section in self.elf.iter_sections():
 			if isinstance(section, SymbolTableSection):
 				for sym in section.iter_symbols():
-					if sym['st_shndx'] != 'SHN_UNDEF' and sym['st_info']['type'] in [ 'STT_FUNC' ] and sym['st_size'] > 0 and sym['st_info']['bind'] == 'STB_GLOBAL':
-						names.append(sym.name)
-		return sorted(names)
+					if sym['st_shndx'] != 'SHN_UNDEF' and sym['st_info']['type'] in [ 'STT_FUNC' ] and sym['st_size'] > 0 and sym['st_info']['bind'] == 'STB_GLOBAL' and sym['st_value'] != 0:
+						names.append((sym.name.split('@')[0], sym['st_value']))
+		return sorted(set(names))
 
 
 	def functions_debug(self, filter = []):
 		decls = {}
-		for name, decl, hash in self.dwarf.iter_func(only_external = True):
-			if len(filter) > 0 and not name in filter:
-				continue
+		for name, addr, ret, params, hash in self.dwarf.iter_func(only_external = True):
+			if len(filter) > 0:
+				for f in filter:
+					if name == f[0] or addr == f[1]:
+						decls[name] = f"{ret} {f[0]}({params})"
+						break
 			else:
-				decls[name] = decl
+				decls[name] = f"{ret} {name}({params})"
 
 		return [ decls[k] for k in sorted(decls) ]
 
 
-	def summary(self, datatypes = True, functions = True, writable_only = False, names = True, verbose = False):
+	def summary(self, datatypes = True, functions_decl = True, writable_only = False, names = True, verbose = False):
 		symbols = self.symbols()
 		variables = []
 		if self.dbgsym and self.dwarf:
@@ -313,7 +316,7 @@ class ElfVar:
 					hash.update(t['hash'])
 				info["datatypes"]["hash"] = hash.hexdigest()
 
-		if functions:
+		if functions_decl:
 			funcs = self.functions()
 			if self.dwarf:
 				funcs = self.functions_debug(filter = funcs)
@@ -333,7 +336,7 @@ class ElfVar:
 		return info
 
 def get_cache_key(buildid, args):
-	return f"{buildid},{args.dbgsym},{args.dbgsym_extern},{args.verbose},{args.aliases},{args.names},{args.datatypes},{args.writable}"
+	return f"{buildid},{args.dbgsym},{args.dbgsym_extern},{args.verbose},{args.aliases},{args.names},{args.datatypes},{args.functions},{args.writable}"
 
 def get_data(file, args, cache):
 	try:
@@ -345,7 +348,7 @@ def get_data(file, args, cache):
 			elf.load_segments()
 			if args.dbgsym:
 				elf.load_debug_symbols(args.dbgsym_extern, args.aliases, args.names)
-			result = elf.summary(datatypes = args.datatypes, writable_only = args.writable, names = args.names, verbose = args.verbose)
+			result = elf.summary(datatypes = args.datatypes, functions_decl = args.functions, writable_only = args.writable, names = args.names, verbose = args.verbose)
 			if args.cache:
 				cache[key] = result
 			return result
