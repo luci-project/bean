@@ -356,7 +356,7 @@ class DwarfVars:
 						if type_DIE:
 							typename, size, hash = self.get_type(type_DIE)
 							variables.append({
-								'name': DIE['name'],
+								'name': DIE['name'] if 'name' in DIE else "[anonymous]",
 								'value': addr,
 								'type': typename,
 								'unit': DIE['unit'],
