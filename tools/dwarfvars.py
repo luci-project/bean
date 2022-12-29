@@ -44,6 +44,8 @@ class DwarfVars:
 	def resolve_abstract_origin(self, unit, ID):
 		if 'abstract_origin' in self.DIEs[unit][ID]:
 			aID = self.DIEs[unit][ID]['abstract_origin']
+			if not isinstance(aID, int):
+				return
 			del self.DIEs[unit][ID]['abstract_origin']
 			self.resolve_abstract_origin(unit, aID)
 			a = self.DIEs[unit][aID]
@@ -409,7 +411,7 @@ class DwarfVars:
 					full_hash = xxhash.xxh64()
 
 					ret = 'void'
-					if 'type' in DIE:
+					if 'type' in DIE and isinstance(DIE['type'], int):
 						ret, size, hash = self.get_type(self.DIEs[DIE['unit']][DIE['type']])
 						full_hash.update(hash)
 

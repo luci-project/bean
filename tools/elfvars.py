@@ -34,6 +34,9 @@ def strcmp(a, b):
 	else:
 		return 0
 
+def page_start(adr):
+	return adr - (adr % PAGE_SIZE)
+
 def compare_symbols(a, b):
 	if a['category'] != b['category']:
 		return strcmp(a['category'], b['category'])
@@ -162,7 +165,7 @@ class ElfVar:
 						#assert(sym['st_value'] - segment['value'] + sym['st_size'] <= segment['size'])
 						symbols.append({
 							'name': sym.name,
-							'value': sym['st_value'] - segment['value'],
+							'value': sym['st_value'] - page_start(segment['value']),
 							'size': sym['st_size'],
 							'align': sym['st_value'] % PAGE_SIZE,
 							'category': 'TLS' if sym['st_info']['type'] == 'STT_TLS' else segment['category'],
@@ -178,15 +181,15 @@ class ElfVar:
 				if dvar['value'] >= seg['value'] and dvar['value'] + dvar['size'] <= seg['value'] + seg['size']:
 					if self.relro and 'W' in seg['category'] and dvar['value'] >= self.relro['value'] and dvar['value'] + dvar['size'] < self.relro['value'] + self.relro['size']:
 						seg = self.relro
-					dvar['align'] = dvar['value'] % PAGE_SIZE;
-					dvar['value'] = dvar['value'] - seg['value']
+					dvar['align'] = dvar['value'] % PAGE_SIZE
+					dvar['value'] = dvar['value'] - page_start(seg['value'])
 					dvar['category'] = seg['category']
 					break
 			else:
 				raise RuntimeError("No segment found for address {}".format(hex(dwarf['value'])))
 
 		for dvar in self.dwarf.get_vars(tls = True):
-			dvar['align'] = dvar['value']  % PAGE_SIZE;
+			dvar['align'] = dvar['value'] % PAGE_SIZE;
 			dvar['category'] = 'TLS'
 			dwarfsyms.append(dvar)
 
