@@ -100,6 +100,14 @@ class Analyze {
 	}
 
 	/*! \brief Insert (or, if address range is already in use, merge) symbol */
+	void insert_symbol_placeholder(uintptr_t address) {
+		auto pos = symbols.find(address);
+		if (!pos || pos->address != address) {
+			symbols.emplace(address);
+		}
+	}
+
+	/*! \brief Insert (or, if address range is already in use, merge) symbol */
 	void insert_symbol(uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false, Elf::sym_bind bind = Elf::STB_LOCAL) {
 		assert(!(executable && writeable));
 		assert(!(executable && Bean::TLS::is_tls(address)));
@@ -123,8 +131,13 @@ class Analyze {
 		} else {
 			if (pos->section.name == nullptr && section_name != nullptr)
 				pos->section.name = section_name;
-			assert(pos->section.writeable == writeable);
-			assert(pos->section.executable == executable);
+			if (pos->size == 0) {
+				pos->section.writeable = writeable;
+				pos->section.executable = executable;
+			} else if (size != 0) {
+				assert(pos->section.writeable == writeable);
+				assert(pos->section.executable == executable);
+			}
 
 			// Maximum bind wins
 			if (pos->bind < bean_bind)
@@ -356,8 +369,11 @@ class Analyze {
 										assert(sym.value() >= sym_sec.virt_addr());
 										assert(sym.value() + sym.size() <= Math::align_up(sym_sec.virt_addr() + sym_sec.size(), sym_sec.alignment()));
 									}
-									if (sym.value() != 0 && elf_sections[sym.section_index()].allocate())
+									if (sym.value() != 0 && elf_sections[sym.section_index()].allocate()) {
 										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.bind());
+										// Make sure that the size from the symbol table is considered
+										insert_symbol(Bean::TLS::trans_addr(sym.value() + sym.size(), sym_sec.tls()));
+									}
 								}
 							}
 						}
