@@ -323,6 +323,8 @@ class ElfVar:
 			funcs = self.functions()
 			if self.dwarf:
 				funcs = self.functions_debug(filter = funcs)
+			else:
+				funcs = sorted([ f[0] for f in funcs ])
 
 			if len(funcs) > 0:
 				hash = xxhash.xxh64()

@@ -71,7 +71,7 @@ for d in base.glob("*/"):
 								continue
 						o.add(f.relative_to(d))
 		if len(dirs) == 0:
-			objs=o
+			objs = o
 		else:
 			objs = objs.intersection(o)
 		dirs.add(d)
