@@ -108,14 +108,20 @@ class DwarfVars:
 							value = int(hexval.group(1))
 					DIE[attrib.group(1)] = value
 
-				# Reduce entries by combining declaration source
-				if 'decl_file' in DIE and 'decl_line' in DIE:
-					DIE['decl'] = DIE['decl_file'].split(" ", 1)[1] + ':' + str(DIE['decl_line'])
-					del DIE['decl_file']
-					del DIE['decl_line']
-					if 'decl_column' in DIE:
-						DIE['decl'] += ':' + str(DIE['decl_column'])
-						del DIE['decl_column']
+				if 'decl_file' in DIE:
+					decl_file = DIE['decl_file'].split(" ", 1)[1]
+					# Check if from system header
+					DIE['system'] = decl_file.startswith(('/usr/lib/gcc/', '/usr/local/include/', '/usr/include/'))
+					# Reduce entries by combining declaration source
+					if 'decl_line' in DIE:
+						DIE['decl'] = decl_file + ':' + str(DIE['decl_line'])
+						del DIE['decl_file']
+						del DIE['decl_line']
+						if 'decl_column' in DIE:
+							DIE['decl'] += ':' + str(DIE['decl_column'])
+							del DIE['decl_column']
+				else:
+					DIE['system'] = None
 
 				DIE['unit'] = unit
 				self.DIEs[unit][ID] = DIE
@@ -376,12 +382,13 @@ class DwarfVars:
 				yield self.DIEs[DIE['unit']][CID]
 
 
-	def iter_types(self):
+	def iter_types(self, include_system_types = False):
 		type_tags = ['structure_type', 'class_type', 'union_type', 'enumeration_type']
 		for DIEs in self.DIEs:
 			for ID, DIE in DIEs.items():
-				if DIE['tag'] in type_tags:
+				if DIE['tag'] in type_tags and (include_system_types or not DIE['system']):
 					yield self.get_type(DIE)
+
 
 	def iter_globals(self):
 		type_tags = ['variable', 'structure_type', 'class_type', 'union_type', 'enumeration_type']
@@ -392,6 +399,7 @@ class DwarfVars:
 					assert(factor == 1)
 					if size > 0:
 						yield cdef, size, DIE
+
 
 	def iter_func(self, only_external = False):
 		type_tags = []
@@ -427,6 +435,7 @@ class DwarfVars:
 					addr = DIE['low_pc'] if 'low_pc' in DIE else 0
 					yield name, addr, ret, ', '.join(params), full_hash.hexdigest()
 
+
 if __name__ == '__main__':
 
 	def dir_path(string):
@@ -450,6 +459,7 @@ if __name__ == '__main__':
 	parser_var.add_argument('-t', '--tls', action='store_true', help='Extract TLS variables')
 	parser_var.add_argument('-j', '--json', action='store_true', help='Output as JSON')
 	parser_data = subparsers.add_parser('datatypes', help='All data types (struct, union, enum) from file')
+	parser_data.add_argument('-t', '--systypes', action='store_true', help='Include types from system headers')
 	parser_glob = subparsers.add_parser('globals', help='All global data types')
 	parser_func = subparsers.add_parser('functions', help='All functions')
 	parser_func.add_argument('-e', '--extern', action='store_true', help='Only external functions')
@@ -472,7 +482,7 @@ if __name__ == '__main__':
 	elif args.extract == 'datatypes':
 		# TODO: Sort by compile unit
 		full_hash = xxhash.xxh64()
-		for id, size, hash in dwarf.iter_types():
+		for id, size, hash in dwarf.iter_types(args.systypes):
 			full_hash.update(hash)
 			print(f"{id} {size} bytes # {hash}")
 		print(full_hash.hexdigest())
