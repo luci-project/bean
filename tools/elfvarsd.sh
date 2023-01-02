@@ -6,13 +6,17 @@ DEFAULTSOCKET="0.0.0.0:9001"
 
 BEAN_TOOLS=$(dirname -- "$(readlink -f "${BASH_SOURCE[0]}")" )
 
+if [ -z ${NODEBUG+exist} ]; then
+	NODEBUG=0
+fi
+
 declare -a BASEDIRS
 while [[ $# -gt 0 ]] ; do
 	case "$1" in
 		-h)
 			echo "Inspect (analyze) all files in base directories on start, cache the results and start elfvars as daemon"
 			echo
-			echo "	Usage: $0 [-h] [-c CACHEPREFIX] [SOCKET [BASE DIRs]] [-- ELFVARS-ARGS]"
+			echo "	Usage: $0 [-h] [-N] [-c CACHEPREFIX] [SOCKET [BASE DIRs]] [-- ELFVARS-ARGS]"
 			echo
 			echo "A socket value 'cache' will only cache the base dirs,"
 			echo "but not open a listen socket."
@@ -27,6 +31,12 @@ while [[ $# -gt 0 ]] ; do
 			shift
 			CACHEPREFIX=$1
 			;;
+
+		-N)
+			shift
+			NODEBUG=1
+			;;
+
 		--)
 			shift
 			ELFVARSARGS=$@
@@ -42,6 +52,16 @@ while [[ $# -gt 0 ]] ; do
 	esac
 	shift
 done
+
+if [[ $NODEBUG -eq 1 ]] ; then
+	echp "Not using debug symbols!"
+	for index in "${!ELFVARSARGS[@]}" ; do
+		if [[ "${ELFVARSARGS[$i],,}" == "-d" ]] ; then
+			unset -v 'ELFVARSARGS[$i]'
+		fi
+	done
+	CACHEPREFIX+='-nodebug'
+fi
 
 ELFVARSARGS+=( '-c' "${CACHEPREFIX}" )
 

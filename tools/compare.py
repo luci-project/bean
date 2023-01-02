@@ -31,6 +31,7 @@ parser.add_argument('--hashtool', help="the bean dwarf variable hash tool", defa
 parser.add_argument('-m', '--matrix', help='Compare each version with each other', action='store_true')
 parser.add_argument('-l', '--lib', help='filter library names (by regex)', nargs='*')
 parser.add_argument('-s', '--dbgsym', action='store_true', help='use (external?) debug symbols in difftool')
+parser.add_argument('-N', '--nodbgsym', action='store_true', help='do not use debug symbols in hashtool')
 parser.add_argument('-d', '--dependencies', action='store_true', help='recursively check all dependencies')
 parser.add_argument('-r', '--relocations', action='store_true', help='resolve internal relocations')
 parser.add_argument('-D', '--verdir', help='filter version directories (by regex)', nargs='*')
@@ -222,7 +223,8 @@ for o in sorted_objs:
 				diffflags = (*diffflags, '-'+'i'*args.internal)
 
 			for a in sorted_dirs:
-				elfvars[str(a.name)] = pool.apply_async(exec_json, (args.hashtool, '-b', str(a), '-d', '-w', '-D', '-t', '-f',  str(a.joinpath(o))), callback=lambda r : progress.advance(task))
+				hashflags = ('-b', str(a), '-d','-D', ) if not args.nodbgsym else ()
+				elfvars[str(a.name)] = pool.apply_async(exec_json, (args.hashtool, *hashflags, '-w', '-t', '-f',  str(a.joinpath(o))), callback=lambda r : progress.advance(task))
 				if args.matrix:
 					tmpdiff={}
 					for b in sorted_dirs:
