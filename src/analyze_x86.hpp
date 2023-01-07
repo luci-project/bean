@@ -559,6 +559,18 @@ class AnalyzeX86 : public Analyze<C> {
 #endif
 					// add instruction hash buffer to hash
 					id_internal.add(hashbuf.buffer(), hashbuf.size());
+
+					// check if zero padding after leave (ubuntu builds...)
+					if (leave) {
+						bool all_zero = true;
+						for (size_t z = 0; z < size; z++)
+							if (data[z] != 0) {
+								all_zero = false;
+								break;
+							}
+						if (all_zero)
+							break;
+					}
 				}
 
 				// If it doesn't end with a leave instruction (ret), or a branch jumps beyond it, we have to link it to the next function (fallthrough)
