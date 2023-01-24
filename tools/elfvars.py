@@ -15,6 +15,8 @@ import os.path
 import argparse
 import functools
 import selectors
+import traceback
+import pprint
 
 from pathlib import Path
 from dwarfvars import DwarfVars
@@ -158,17 +160,26 @@ class ElfVar:
 		for section in self.elf.iter_sections():
 			if isinstance(section, SymbolTableSection):
 				for sym in section.iter_symbols():
-					if sym['st_shndx'] != 'SHN_UNDEF' and sym['st_info']['type'] in [ 'STT_OBJECT', 'STT_TLS' ] and sym['st_size'] > 0:
+					if sym['st_shndx'] != 'SHN_UNDEF' and sym['st_info']['type'] in [ 'STT_OBJECT', 'STT_COMMON', 'STT_TLS' ] and sym['st_size'] > 0:
 						segment = self.segments[self.sec2seg[sym['st_shndx']]]
 						if self.relro and 'W' in segment['category'] and sym['st_value'] >= self.relro['value'] and sym['st_value'] + sym['st_size'] < self.relro['value'] + self.relro['size']:
 							segment = self.relro
 						#assert(sym['st_value'] - segment['value'] + sym['st_size'] <= segment['size'])
+						value = sym['st_value']
+						align = sym['st_value']
+						if sym['st_info']['type'] == 'STT_TLS':
+							tls = True
+						else:
+							tls = False
+							value -= page_start(segment['value'])
+							align %= PAGE_SIZE
+
 						symbols.append({
 							'name': sym.name,
-							'value': sym['st_value'] - page_start(segment['value']),
-							'size': sym['st_size'],
-							'align': sym['st_value'] % PAGE_SIZE,
-							'category': 'TLS' if sym['st_info']['type'] == 'STT_TLS' else segment['category'],
+							'value': value,
+							'size': sym['st_size'] if isinstance(sym['st_size'], int) else int(sym['st_size'],0),
+							'align': align,
+							'category': 'TLS' if tls else segment['category'],
 							'external': True if sym['st_info']['bind'] == 'STB_GLOBAL' else False
 						})
 		return symbols
@@ -186,7 +197,7 @@ class ElfVar:
 					dvar['category'] = seg['category']
 					break
 			else:
-				raise RuntimeError("No segment found for address {}".format(hex(dwarf['value'])))
+				raise RuntimeError("No segment found for address {}".format(hex(dvar['value'])))
 
 		for dvar in self.dwarf.get_vars(tls = True):
 			dvar['align'] = dvar['value'] % PAGE_SIZE;
@@ -359,6 +370,7 @@ def get_data(file, args, cache):
 			return result
 	except Exception as e:
 		print(f"Error on {file}: {str(e)}", file=sys.stderr)
+		traceback.print_exc()
 		return None
 
 def simplify(data):
@@ -452,37 +464,41 @@ if __name__ == '__main__':
 	parser.add_argument('file', type=argparse.FileType('rb'), help="ELF file with debug information", nargs='*')
 	args = parser.parse_args()
 
-	cache = shelve.open(args.cache) if args.cache else None
+	if not args.file and not args.socket:
+		parser.print_usage()
 
-	if args.file:
-		files = []
-		for file in args.file:
-			result = get_data(file, args, cache)
-			if args.plain:
-				print(simplify(result))
-			else:
-				files.append(result)
-		if len(files) > 0:
-			print(json.dumps(files, indent=4))
-		# TODO: Compare if multiple files
+	else:
+		cache = shelve.open(args.cache) if args.cache else None
 
-	if args.socket:
-		inet = re.search(r'^[ ]*((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|(?:(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*(?:[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])):([0-9]{1,5})[ ]*$', args.socket)
-		if inet:
-			with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-				s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-				s.bind((inet.group(1), int(inet.group(2))))
-				print(f'Listening at port {inet.group(2)} on host {inet.group(1)}', file=sys.stderr)
-				listen_socket(s, args, cache)
-		else:
-			if os.path.exists(args.socket):
-				print(f'Error: socket file {args.socket} already exists', file=sys.stderr)
-			else:
-				with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-					s.bind((args.socket))
-					print(f'Listening at unix domain socket at {args.socket}', file=sys.stderr)
+		if args.file:
+			files = []
+			for file in args.file:
+				result = get_data(file, args, cache)
+				if args.plain:
+					print(simplify(result))
+				else:
+					files.append(result)
+			if len(files) > 0:
+				print(json.dumps(files, indent=4))
+			# TODO: Compare if multiple files
+
+		if args.socket:
+			inet = re.search(r'^[ ]*((?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|(?:(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]*[a-zA-Z0-9])\.)*(?:[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\-]*[A-Za-z0-9])):([0-9]{1,5})[ ]*$', args.socket)
+			if inet:
+				with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+					s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+					s.bind((inet.group(1), int(inet.group(2))))
+					print(f'Listening at port {inet.group(2)} on host {inet.group(1)}', file=sys.stderr)
 					listen_socket(s, args, cache)
-				os.remove(args.socket)
+			else:
+				if os.path.exists(args.socket):
+					print(f'Error: socket file {args.socket} already exists', file=sys.stderr)
+				else:
+					with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+						s.bind((args.socket))
+						print(f'Listening at unix domain socket at {args.socket}', file=sys.stderr)
+						listen_socket(s, args, cache)
+					os.remove(args.socket)
 
-	if args.cache:
-		cache.close()
+		if args.cache:
+			cache.close()

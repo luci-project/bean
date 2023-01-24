@@ -1,0 +1,5 @@
+natsort
+pyelftools>=0.29
+regex
+rich>=13.1.0
+xxhash>=3.2.0

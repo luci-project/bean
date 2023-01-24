@@ -12,10 +12,29 @@ import subprocess
 from pathlib import Path
 
 from dbgsym import DebugSymbol
+from dwarfparse import parse_dwarf, LocExpr
+
+def get_loc(loc_expr, tls = False):
+	if len(loc_expr.value) != 1:
+		return None
+	elif tls:
+		for op in loc_expr.op:
+			if op != 'form_tls_address' and not op.startswith('const'):
+				return None
+	else:
+		if not len(loc_expr.op) == 1 or not 'addr' in loc_expr.op:
+			return None
+	return int(next(iter(loc_expr.value)),0)
+
+def to_int(val):
+	if isinstance(val, int):
+		return val
+	else:
+		return int(val, 0)
 
 class DwarfVars:
 	def __init__(self, file, aliases = True, names = True, external_dbgsym = True, root = ''):
-		self.DIEs = []
+		self.DIEs = {}
 		self.aliases = aliases
 		self.names = names
 		self.incomplete = False
@@ -41,108 +60,18 @@ class DwarfVars:
 		if not self.dbgsym:
 			raise FileNotFoundError(errno.ENOENT, "No Debug Information available", file)
 
-	def resolve_abstract_origin(self, unit, ID):
-		if 'abstract_origin' in self.DIEs[unit][ID]:
-			aID = self.DIEs[unit][ID]['abstract_origin']
-			if not isinstance(aID, int):
-				return
-			del self.DIEs[unit][ID]['abstract_origin']
-			self.resolve_abstract_origin(unit, aID)
-			a = self.DIEs[unit][aID]
-			s = self.DIEs[unit][ID]
-			self.DIEs[unit][ID] = { **a , **s  }
-
 	def parse(self, file):
-		entries = regex.compile(r'^<(\d+)><(0x[0-9a-f]+)(?:\+0x[0-9a-f]+)?><([^>]+)>(.*)$')
-		attribs = regex.compile(r' ([^<>]+)(<((?>[^<>]+|(?2)))>)')
-		hexvals = regex.compile(r'^[<]?(0x[0-9a-f]+|[0-9]+)(:? \(-[0-9]+\))?[>]?$')
-		level = 0
-		last = 0
-		unit = 0
-		skip = True
-		dwarfdump = subprocess.Popen(['dwarfdump', '-i', '-e', '-d', file], stdout=subprocess.PIPE)
-		while line := dwarfdump.stdout.readline().decode('utf-8'):
-			if entry := entries.match(line):
-				DIE = {}
-				ID = int(entry.group(2), 0)
+		with open(file, "rb") as fh:
+			self.DIEs = parse_dwarf(fh)
+		return self.DIEs
 
-				DIE['tag'] = entry.group(3)
-				DIE['children'] = []
-
-				if entry.group(3) == 'compile_unit':
-					DIE['parent'] = ID
-					self.DIEs.append({})
-					unit = len(self.DIEs) - 1
-					skip = False
-				elif skip or entry.group(3) == 'partial_unit':
-					skip = True
-					continue
-				else:
-					# Nesting level
-					l = int(entry.group(1))
-					assert(l > 0)
-					if l > level:
-						assert(l == level + 1)
-						parent = last
-						level = l
-					else:
-						parent = self.DIEs[unit][last]['parent']
-						while l < level:
-							parent = self.DIEs[unit][parent]['parent']
-							level = level - 1
-						assert(level == l)
-
-					# Set parent
-					DIE['parent'] = parent
-					# In parent add child
-					self.DIEs[unit][parent]['children'].append(ID)
-				last = ID
-
-				# Additional attributes
-				for attrib in attribs.finditer(entry.group(4)):
-					value = attrib.group(3)
-					if hexval := hexvals.match(value):
-						try:
-							value = int(hexval.group(1), 0)
-						except ValueError:
-							value = int(hexval.group(1))
-					DIE[attrib.group(1)] = value
-
-				if 'decl_file' in DIE:
-					decl_file = DIE['decl_file'].split(" ", 1)[1]
-					# Check if from system header
-					DIE['system'] = decl_file.startswith(('/usr/lib/gcc/', '/usr/local/include/', '/usr/include/'))
-					# Reduce entries by combining declaration source
-					if 'decl_line' in DIE:
-						DIE['decl'] = decl_file + ':' + str(DIE['decl_line'])
-						del DIE['decl_file']
-						del DIE['decl_line']
-						if 'decl_column' in DIE:
-							DIE['decl'] += ':' + str(DIE['decl_column'])
-							del DIE['decl_column']
-				else:
-					DIE['system'] = None
-
-				DIE['unit'] = unit
-				self.DIEs[unit][ID] = DIE
-
-		for unit, DIEs in enumerate(self.DIEs):
-			for ID, DIE in DIEs.items():
-				self.resolve_abstract_origin(unit, ID)
-
-		return len(self.DIEs) > 0
-
-	def get_die(self, unit, type):
-		if unit >= len(self.DIEs):
-			print(f"Unit {unit} not found -- got only {len(self.DIEs)} units", file=sys.stderr)
-			self.incomplete = True
-			return None
-		elif not type in self.DIEs[unit]:
-			print(f"Type {type} not found in unit {unit}", file=sys.stderr)
+	def get_die(self, type):
+		if not type[0] in self.DIEs:
+			print(f"Type {type} not found", file=sys.stderr)
 			self.incomplete = True
 			return None
 		else:
-			return self.DIEs[unit][type]
+			return self.DIEs[type[0]]
 
 	def get_type(self, DIE, resolve_members = True):
 		if not resolve_members and 'children' in DIE:
@@ -221,11 +150,11 @@ class DwarfVars:
 				id += '}'
 
 			if 'type' in DIE:
-				type_DIE = self.get_die(DIE['unit'], DIE['type'])
+				type_DIE = self.get_die(DIE['type'])
 				if type_DIE:
 					type_id, type_size, type_hash = self.get_type(type_DIE, resolve_members)
 					id += '(' + type_id + ')' if len(id) > 0 else type_id
-					size = type_size
+					size = to_int(type_size)
 					# TODO with partial unit type_hash might be random
 					if size != 0 or len(type_id) != 0:
 						hash.update('#' + type_hash)
@@ -237,8 +166,12 @@ class DwarfVars:
 			elif DIE['tag'] == 'array_type':
 				for child in self.iter_children(DIE):
 					if child['tag'] == 'subrange_type':
-						lower = child.get('lower_bound', 0)
-						upper = child.get('upper_bound', 0)
+						lower = to_int(child.get('lower_bound', 0))
+						if not isinstance(lower, int):
+							lower = 0;
+						upper = to_int(child.get('upper_bound', 0))
+						if not isinstance(upper, int):
+							upper = 0;
 						hash.update('[' + str(lower) + ':' + str(upper) + ']')
 						subrange = upper - lower + 1
 						id += '[' + str(subrange) + ']'
@@ -257,12 +190,12 @@ class DwarfVars:
 			hash.update(':' + str(factor))
 			DIE[key_id] = id
 			if 'total_size' in DIE:
-				assert(DIE['total_size'] == factor * size)
+				assert(to_int(DIE['total_size']) == factor * size)
 			else:
 				DIE['total_size'] = factor * size
 			DIE[key_hash] = type_hash if use_type_hash else hash.hexdigest()
 
-		return DIE[key_id], DIE['total_size'], DIE[key_hash]
+		return DIE[key_id], to_int(DIE['total_size']), DIE[key_hash]
 
 
 	def get_def(self, DIE, resolve_members = True, skip_const = False):
@@ -315,7 +248,7 @@ class DwarfVars:
 			cdef += '}'
 
 		if 'type' in DIE and (DIE['tag'] != 'typedef' or self.aliases):
-			def_DIE = self.get_die(DIE['unit'], DIE['type'])
+			def_DIE = self.get_die(DIE['type'])
 			if def_DIE:
 				type_cdef, type_size, factor = self.get_def(def_DIE, resolve_members, skip_const)
 				cdef += type_cdef
@@ -329,7 +262,7 @@ class DwarfVars:
 		elif DIE['tag'] == 'array_type':
 			for child in self.iter_children(DIE):
 				if child['tag'] == 'subrange_type':
-					factor *= child.get('upper_bound', 0) - child.get('lower_bound', 0) + 1
+					factor *= to_int(child.get('upper_bound', 0)) - to_int(child.get('lower_bound', 0)) + 1
 
 		if name and self.names and (DIE['tag'] != 'typedef' or not self.aliases):
 			if len(cdef) > 0:
@@ -340,100 +273,95 @@ class DwarfVars:
 				factor = 1
 
 		if 'byte_size' in DIE:
-			size = DIE['byte_size']
+			size = to_int(DIE['byte_size'])
 
 		if 'total_size' in DIE:
-			assert(DIE['total_size'] == factor * size)
+			assert(to_int(DIE['total_size']) == factor * size)
 		else:
 			DIE['total_size'] = factor * size
 
-		return cdef, DIE['total_size'], factor
+		return cdef, to_int(DIE['total_size']), factor
+
 
 	def get_vars(self, tls = False):
-		if tls:
-			locaddr = regex.compile(r'^.*: const[0-9su]+ ([0-9a-f]+) GNU_push_tls_address$')
-		else:
-			locaddr = regex.compile(r'^.*: addr (0x[0-9a-f]+)$')
 		variables = []
-		for DIEs in self.DIEs:
-			for ID, DIE in DIEs.items():
-				if DIE['tag'] == 'variable' and 'location' in DIE and 'type' in DIE:
-					if loc := locaddr.match(DIE['location']):
-						addr = int(loc.group(1), 0)
-						type_DIE = self.get_die(DIE['unit'], DIE['type'])
-						if type_DIE:
-							typename, size, hash = self.get_type(type_DIE)
-							variables.append({
-								'name': DIE['name'] if 'name' in DIE else "[anonymous]",
-								'value': addr,
-								'type': typename,
-								'unit': DIE['unit'],
-								'size': size,
-								'external': True if 'external' in DIE and DIE['external'][:3] == 'yes' else False,
-								'hash': hash,
-								'source': DIE['decl'] if 'decl' in DIE else ''
-							})
+		for ID, DIE  in self.DIEs.items():
+			if DIE['tag'] == 'variable' and 'location' in DIE and 'type' in DIE:
+				addr = get_loc(DIE['location'], tls)
+				if addr is None or (addr == 0 and not tls):
+					continue
+				type_DIE = self.get_die(DIE['type'])
+				if not type_DIE:
+					continue
+				typename, size, hash = self.get_type(type_DIE)
+				variables.append({
+					'name': DIE['name'] if 'name' in DIE else "[anonymous]",
+					'value': addr,
+					'type': typename,
+					'unit': DIE['unit'],
+					'size': size,
+					'external': DIE['external'] if 'external' in DIE else False,
+					'hash': hash,
+					'source': DIE['decl'] if 'decl' in DIE else ''
+				})
 		return variables
 
 
 	def iter_children(self,  DIE):
 		if 'children' in DIE:
 			for CID in DIE['children']:
-				yield self.DIEs[DIE['unit']][CID]
+				yield self.DIEs[CID]
 
 
 	def iter_types(self, include_system_types = False):
 		type_tags = ['structure_type', 'class_type', 'union_type', 'enumeration_type']
-		for DIEs in self.DIEs:
-			for ID, DIE in DIEs.items():
-				if DIE['tag'] in type_tags and (include_system_types or not DIE['system']):
-					yield self.get_type(DIE)
+		for ID, DIE in self.DIEs.items():
+			if DIE['tag'] in type_tags and (include_system_types or not 'decl' in DIE or not DIE['decl'].startswith(('/usr/lib/gcc/', '/usr/local/include/', '/usr/include/'))):
+				yield self.get_type(DIE)
 
 
 	def iter_globals(self):
 		type_tags = ['variable', 'structure_type', 'class_type', 'union_type', 'enumeration_type']
-		for unit, DIEs in enumerate(self.DIEs):
-			for ID, DIE in DIEs.items():
-				if DIE['tag'] in type_tags and ('name' in DIE or 'linkage_name' in DIE):
-					cdef, size, factor = self.get_def(DIE)
-					assert(factor == 1)
-					if size > 0:
-						yield cdef, size, DIE
+		for ID, DIE in self.DIEs.items():
+			if DIE['tag'] in type_tags and ('name' in DIE or 'linkage_name' in DIE):
+				cdef, size, factor = self.get_def(DIE)
+				assert(factor == 1)
+				if size > 0:
+					yield cdef, size, DIE
 
 
 	def iter_func(self, only_external = False):
 		type_tags = []
-		for DIEs in self.DIEs:
-			for ID, DIE in DIEs.items():
-				if 'declaration' in DIE and DIE['declaration'][:3] == 'yes':
+		for ID, DIE in self.DIEs.items():
+			if 'declaration' in DIE and DIE['declaration']:
+				continue
+			elif only_external and not ('external' in DIE and DIE['external']):
+				continue
+			elif DIE['tag'] == 'subprogram':
+				if 'linkage_name' in DIE:
+					name = DIE['linkage_name']
+				elif 'name' in DIE:
+					name = DIE['name']
+				else:
 					continue
-				elif only_external and not ('external' in DIE and DIE['external'][:3] == 'yes'):
-					continue
-				elif DIE['tag'] == 'subprogram':
-					if 'linkage_name' in DIE:
-						name = DIE['linkage_name']
-					elif 'name' in DIE:
-						name = DIE['name']
-					else:
-						continue
-					full_hash = xxhash.xxh64()
+				full_hash = xxhash.xxh64()
 
-					ret = 'void'
-					if 'type' in DIE and isinstance(DIE['type'], int):
-						ret, size, hash = self.get_type(self.DIEs[DIE['unit']][DIE['type']])
+				ret = 'void'
+				if 'type' in DIE and DIE['type'][0] in self.DIEs:
+					ret, size, hash = self.get_type(self.DIEs[DIE['type'][0]])
+					full_hash.update(hash)
+
+				full_hash.update(name)
+
+				params = []
+				for param in self.iter_children(DIE):
+					if param['tag'] == 'formal_parameter':
+						type, size, hash = self.get_type(param)
 						full_hash.update(hash)
+						params.append(type)
 
-					full_hash.update(name)
-
-					params = []
-					for param in self.iter_children(DIE):
-						if param['tag'] == 'formal_parameter':
-							type, size, hash = self.get_type(param)
-							full_hash.update(hash)
-							params.append(type)
-
-					addr = DIE['low_pc'] if 'low_pc' in DIE else 0
-					yield name, addr, ret, ', '.join(params), full_hash.hexdigest()
+				addr = DIE['low_pc'] if 'low_pc' in DIE else 0
+				yield name, addr, ret, ', '.join(params), full_hash.hexdigest()
 
 
 if __name__ == '__main__':
