@@ -63,18 +63,20 @@ extern "C" void* memset(void * dest, int c, size_t size) {
 }
 
 bool capstone_dump(BufferStream & out, void * ptr, size_t size, uintptr_t start) {
+	capstone_init();
 	csh cshandle;
 	bool r = false;
 	if (::cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) == CS_ERR_OK) {
 		cs_insn *insn = cs_malloc(cshandle);
 		if (insn != nullptr) {
-			while (cs_disasm_iter(cshandle, reinterpret_cast<const uint8_t **>(ptr), &size, &start, insn)) {
+			const uint8_t * data = reinterpret_cast<const uint8_t *>(ptr);
+			while (cs_disasm_iter(cshandle, &data, &size, &start, insn)) {
 				// Address
-				out.format("0x%10llx: ", insn->address);
+				out.format("0x%06llx: ", insn->address);
 				// Machine Bytes
 				for (size_t i = 0; i < 15; i++) {
 					if (i < insn->size)
-						out.format("%2x ", static_cast<unsigned>(insn->bytes[i]));
+						out.format("%02x ", static_cast<unsigned>(insn->bytes[i]));
 					else
 						out.format("   ");
 				}
