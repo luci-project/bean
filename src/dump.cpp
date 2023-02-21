@@ -56,7 +56,7 @@ Bean::symtree_t::ConstIterator Bean::dump_address(BufferStream & bs, uintptr_t v
 		bs << "TLS:";
 	bs << "0x" << hex << TLS::virt_addr(value);
 	const auto ref_sym = symbols.floor(value);
-	if (ref_sym) {
+	if (ref_sym && Bean::TLS::is_tls(ref_sym->address) == Bean::TLS::is_tls(value)) {
 		bs << " <";
 		if (ref_sym->name != nullptr)
 			bs << ref_sym->name;

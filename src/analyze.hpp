@@ -448,7 +448,7 @@ class Analyze {
 				// References
 				for (const auto ref : sym.refs) {
 					auto ref_sym = symbols.floor(ref);
-					if (ref_sym) {
+					if (ref_sym && Bean::TLS::is_tls(ref_sym->address) == Bean::TLS::is_tls(ref)) {
 						// Special case: external symbols in GOT:
 						if (ref_sym->address == global_offset_table) {
 							// Special case for first three entries:
