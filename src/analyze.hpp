@@ -108,26 +108,35 @@ class Analyze {
 	}
 
 	/*! \brief Insert (or, if address range is already in use, merge) symbol */
-	void insert_symbol(uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false, Elf::sym_bind bind = Elf::STB_LOCAL) {
+	void insert_symbol(uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false, Elf::sym_type type = Elf::STT_HIPROC, Elf::sym_bind bind = Elf::STB_LOCAL) {
 		assert(!(executable && writeable));
 		assert(!(executable && Bean::TLS::is_tls(address)));
+
+		// type
+		Bean::Symbol::Type bean_type = Bean::Symbol::TYPE_UNKNOWN;
+		switch (type) {
+			case Elf::STT_NOTYPE: bean_type = Bean::Symbol::TYPE_NONE; break;
+			case Elf::STT_OBJECT: bean_type = Bean::Symbol::TYPE_OBJECT; break;
+			case Elf::STT_FUNC: bean_type = Bean::Symbol::TYPE_FUNC; break;
+			case Elf::STT_SECTION: bean_type = Bean::Symbol::TYPE_SECTION; break;
+			case Elf::STT_FILE: bean_type = Bean::Symbol::TYPE_FILE; break;
+			case Elf::STT_COMMON: bean_type = Bean::Symbol::TYPE_COMMON; break;
+			case Elf::STT_TLS: bean_type = Bean::Symbol::TYPE_TLS; break;
+			case Elf::STT_GNU_IFUNC: bean_type = Bean::Symbol::TYPE_INDIRECT_FUNC; break;
+			default: /* Keep default unknown type */ break;
+		}
+
+		// bind
 		Bean::Symbol::Bind bean_bind = Bean::Symbol::BIND_LOCAL;
 		switch (bind) {
-			case Elf::STB_WEAK:
-				bean_bind = Bean::Symbol::BIND_WEAK;
-				break;
-
-			case Elf::STB_GLOBAL:
-				bean_bind = Bean::Symbol::BIND_GLOBAL;
-				break;
-
-			default:
-				// Keep default local (there is not only STB_LOCAL, but also stuff like STB_GNU_UNIQUE...)
-				break;
+			case Elf::STB_WEAK:	bean_bind = Bean::Symbol::BIND_WEAK; break;
+			case Elf::STB_GLOBAL: bean_bind = Bean::Symbol::BIND_GLOBAL; break;
+			default: /* Keep default local (there is not only STB_LOCAL, but also stuff like STB_GNU_UNIQUE...) */	break;
 		}
+
 		auto pos = symbols.find(address);
 		if (!pos) {
-			symbols.emplace(address, size, name, section_name, writeable, executable, bean_bind);
+			symbols.emplace(address, size, name, section_name, writeable, executable, bean_type, bean_bind);
 		} else {
 			if (pos->section.name == nullptr && section_name != nullptr)
 				pos->section.name = section_name;
@@ -138,6 +147,10 @@ class Analyze {
 				assert(pos->section.writeable == writeable);
 				assert(pos->section.executable == executable);
 			}
+
+			if (bean_type != Bean::Symbol::TYPE_UNKNOWN && is(pos->type).in(Bean::Symbol::TYPE_UNKNOWN, Bean::Symbol::TYPE_SECTION, Bean::Symbol::TYPE_FILE, Bean::Symbol::TYPE_COMMON))
+				pos->type = bean_type;
+			assert(bean_type == Bean::Symbol::TYPE_UNKNOWN || pos->type == bean_type);
 
 			// Maximum bind wins
 			if (pos->bind < bean_bind)
@@ -362,7 +375,7 @@ class Analyze {
 								if (sym.type() == ELF<C>::STT_TLS) {
 									assert(sym_sec.tls());
 									assert(tls_segment.has_value());
-									insert_symbol(Bean::TLS::trans_addr(tls_segment.value().virt_addr() + sym.value(), true), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.bind());
+									insert_symbol(Bean::TLS::trans_addr(tls_segment.value().virt_addr() + sym.value(), true), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.type(), sym.bind());
 								} else {
 									assert(!Bean::TLS::is_tls(sym.value()));  // check for address space conflicts
 									if (sym.type() != ELF<C>::STT_NOTYPE) {
@@ -370,9 +383,10 @@ class Analyze {
 										assert(sym.value() + sym.size() <= Math::align_up(sym_sec.virt_addr() + sym_sec.size(), sym_sec.alignment()));
 									}
 									if (sym.value() != 0 && elf_sections[sym.section_index()].allocate()) {
-										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.bind());
+										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.type(), sym.bind());
 										// Make sure that the size from the symbol table is considered
-										insert_symbol(Bean::TLS::trans_addr(sym.value() + sym.size(), sym_sec.tls()));
+										if (sym.size() > 0)
+											insert_symbol(Bean::TLS::trans_addr(sym.value() + sym.size(), sym_sec.tls()));
 									}
 								}
 							}

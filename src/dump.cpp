@@ -1,5 +1,19 @@
 #include <bean/bean.hpp>
 
+static void dump_type(BufferStream & bs, Bean::Symbol::Type type) {
+	switch (type) {
+		case Bean::Symbol::TYPE_NONE:           bs << "none";      break;
+		case Bean::Symbol::TYPE_OBJECT:         bs << "object";    break;
+		case Bean::Symbol::TYPE_FUNC:           bs << "function";  break;
+		case Bean::Symbol::TYPE_SECTION:        bs << "section";   break;
+		case Bean::Symbol::TYPE_FILE:           bs << "filename";  break;
+		case Bean::Symbol::TYPE_COMMON:         bs << "common";    break;
+		case Bean::Symbol::TYPE_TLS:            bs << "TLS";       break;
+		case Bean::Symbol::TYPE_INDIRECT_FUNC:  bs << "indirect";  break;
+		default:                                bs << "unknown";   break;
+	}
+}
+
 static void dump_bind(BufferStream & bs, Bean::Symbol::Bind bind) {
 	switch (bind) {
 		case Bean::Symbol::BIND_WEAK:   bs << "weak";    break;
@@ -66,7 +80,7 @@ void Bean::Symbol::dump_header(BufferStream & bs, Verbosity level) {
 	if (level <= VERBOSE) {
 		bs << "{ID               ID refs         }";
 		if (level == VERBOSE)
-			bs << " [Ref / Rel / Dep] - Address              Size Bind  Flag Name (Section)";
+			bs << " [Ref / Rel / Dep] - Address              Size Type     Bind  Flag Name (Section)";
 		bs << endl;
 	}
 }
@@ -79,8 +93,10 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 			bs << " [" << setw(3) << right << refs.size() << " / " << setw(3) << right << rels.size() << " / " << setw(3) << right << deps.size() << "] - "
 			   << "0x" << setw(16) << setfill('0') << hex << TLS::virt_addr(address)
 			   << dec << setw(7) << setfill(' ') << right << size << ' '
-			   << setw(6) << left;
-			 dump_bind(bs, bind);
+			   << setw(9) << left;
+			dump_type(bs, type);
+			bs << setw(6) << left;
+			dump_bind(bs, bind);
 			bs << ' '
 			   << (section.writeable ? ((section.flags & Symbol::Section::SECTION_RELRO) != 0 ? 'R' : 'W') : ' ') << (section.executable ? 'X' : ' ') << (TLS::is_tls(address) ? 'T' : ' ');
 			if (name != nullptr && name[0] != '\0')

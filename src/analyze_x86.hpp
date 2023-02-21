@@ -96,7 +96,8 @@ class AnalyzeX86 : public Analyze<C> {
 						case X86_INS_ENDBR64:
 							start = insn->address;
 							if (ret) {
-								this->insert_symbol(Bean::TLS::trans_addr(start, section.tls()), 0, nullptr, section.name(), section.writeable(), section.executable());
+								assert(section.executable());
+								this->insert_symbol(Bean::TLS::trans_addr(start, section.tls()), 0, nullptr, section.name(), section.writeable(), section.executable(), Elf::STT_FUNC);
 								ret = false;
 							}
 							break;
@@ -126,6 +127,7 @@ class AnalyzeX86 : public Analyze<C> {
 										else {
 											auto sec = this->sections.floor(start);
 											assert(sec);
+											assert(section.executable());
 											this->symbols.emplace(start, Bean::TLS::trans_addr(address - start, sec->tls()), name, sec->name(), sec->writeable(), sec->executable());
 										}
 									}
@@ -147,7 +149,7 @@ class AnalyzeX86 : public Analyze<C> {
 								// Only in executable sections
 								const auto section = this->sections.floor(target);
 								if (section && section->executable())
-									this->insert_symbol(Bean::TLS::trans_addr(target, section->tls()), 0, nullptr, section->name(), section->writeable(), true);
+									this->insert_symbol(Bean::TLS::trans_addr(target, section->tls()), 0, nullptr, section->name(), section->writeable(), true, Elf::STT_FUNC);
 
 								break;
 							}

@@ -115,6 +115,19 @@ struct Bean {
 		/*! \brief Symbol name (for debugging) */
 		const char * name;
 
+		/*! \brief Symbol type */
+		enum Type {
+			TYPE_NONE,
+			TYPE_OBJECT,
+			TYPE_FUNC,
+			TYPE_SECTION,
+			TYPE_FILE,
+			TYPE_COMMON,
+			TYPE_TLS,
+			TYPE_INDIRECT_FUNC,
+			TYPE_UNKNOWN
+		} type;
+
 		/*! \brief Symbol bind */
 		enum Bind {
 			BIND_WEAK   = -1,
@@ -200,8 +213,8 @@ struct Bean {
 		/*! \brief Relocations affecting this symbol */
 		TreeSet<SymbolRelocation, SymbolAddressComparison> rels;
 
-		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable, Bind bind = BIND_LOCAL, uint16_t flags = Section::SECTION_NONE)
-		  : address(address), size(size), name(name), bind(bind), section({section_name, writeable, executable, flags}), debug(nullptr) {}
+		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable, Type type = TYPE_UNKNOWN, Bind bind = BIND_LOCAL, uint16_t flags = Section::SECTION_NONE)
+		  : address(address), size(size), name(name), type(type), bind(bind), section({section_name, writeable, executable, flags}), debug(nullptr) {}
 
 		Symbol(const Symbol &) = default;
 		Symbol(Symbol &&) = default;
