@@ -2,6 +2,7 @@
 
 #include <dlh/container/optional.hpp>
 #include <dlh/container/pair.hpp>
+#include <dlh/is_in.hpp>
 #include <bean/bean.hpp>
 
 template<ELFCLASS C>
@@ -406,7 +407,6 @@ class Analyze {
 			for (auto & section_flag : section_flags)
 				if (sym.address >= section_flag.start && sym.address + sym.size < section_flag.start + section_flag.size)
 					sym.section.flags |= section_flag.flag;
-
 	}
 
 	/*! \brief Additional read operation, arch depending */
@@ -456,7 +456,7 @@ class Analyze {
 							//  - got[1] is pointer to object (assigned in Luci)
 							//  - got[2] is resolve function (assigned in Luci)
 							if (ref - ref_sym->address < sizeof(void*) * 3) {
-								id_external.add<const char*>("GOT-Special");
+								id_external.add<const char*>("#GOT-Special");
 								id_external.add<uintptr_t>(ref - ref_sym->address);
 								continue;
 							}
@@ -475,14 +475,18 @@ class Analyze {
 						if (ref_sym->bind == Bean::Symbol::BIND_GLOBAL) {
 							// Since global symbols are part of the API,
 							// which must not been altered, there is no reason to check this
+							id_external.add<const char*>(ref_sym->name);
+							id_external.add<uint8_t>(ref_sym->type);
 						} else {
-							// Hash ID and offset
+							// Hash ID, Type and offset
 							id_external.add<uint64_t>(ref_sym->id.internal);
+							id_external.add<uint8_t>(ref_sym->type);
 							id_external.add<uint64_t>(ref - ref_sym->address);
 							ref_sym->deps.insert(sym.address);
 						}
 					} else {
-						// TODO
+						// Hash unresolved symbol adress
+						id_external.add<uint64_t>(ref);
 					}
 				}
 				sym.id.external = id_external.hash();
