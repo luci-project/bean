@@ -227,7 +227,7 @@ class AnalyzeX86 : public Analyze<C> {
 					this->debug_stream << "\e[34m";
 				else if (i >= prefix_size + opcode_size + debug_ignore)
 					// This is not necessarly accurate - depending on the encoding
-					// however it is only for hash visualization, the real hash uses the disassembled inormation instead of the machine code bytes
+					// however it is only for hash visualization, the real hash uses the disassembled information instead of the machine code bytes
 					this->debug_stream << "\e[35m";
 				else
 					this->debug_stream << "\e[36m";
@@ -435,7 +435,7 @@ class AnalyzeX86 : public Analyze<C> {
 						case X86_INS_NOP:
 							continue;
 
-						// Instruction which leave (and do note return like call)
+						// Instruction which leave (and do not return like call)
 						case X86_INS_JMP:
 						case X86_INS_LJMP:
 						case X86_INS_RET:
@@ -589,7 +589,7 @@ class AnalyzeX86 : public Analyze<C> {
 				if (address >= seg.virt_addr() + seg.size())
 					is_bss = true;
 
-				if (!is_bss) // TODO: Why?
+				if (!is_bss)
 					for (auto relocation = this->relocations.ceil(sym); relocation != this->relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
 						auto r = sym.rels.emplace(*relocation, this->resolve_internal_relocations, this->global_offset_table);
 						// Add local (internal) relocation as reference
@@ -653,6 +653,92 @@ class AnalyzeX86 : public Analyze<C> {
 	}
 
  public:
+	void reconstruct_relocations() {
+		// Iterate over all symbols
+		size_t last_addr = SIZE_MAX;
+
+		for (auto & sym : reverse(this->symbols)) {
+			// Load corresponding section
+			const auto section = this->sections.floor(sym);
+			assert(section);
+
+			// Set symbol section flags
+			if (sym.section.name == nullptr) {
+				sym.section.name = section->name();
+				sym.section.executable = section->executable();
+				sym.section.writeable = section->writeable();
+			}
+
+			// 3a. calculate size (if 0), TODO: ignore nops!
+			const size_t max_addr = Math::min(last_addr, Bean::TLS::trans_addr(Math::align_up(section->virt_addr() + section->size(), section->alignment()), section->tls()));
+			uintptr_t address = Bean::TLS::virt_addr(sym.address);
+			assert(max_addr >= sym.address);
+			const size_t max_size = max_addr - sym.address;
+			if (max_size > sym.size)
+				sym.size = max_size;
+
+			// 3b. generate links (from jmp + call) & hash
+			const size_t offset = address - section->virt_addr();
+			const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
+			if (sym.section.executable) {
+				// TLS cannot be executable
+				assert(!section->tls());
+
+				size_t size = sym.size;
+				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
+					auto & detail_x86 = insn->detail->x86;
+
+					// Handle operands
+					for (int o = 0; o < detail_x86.op_count; o++) {
+						auto & op = detail_x86.operands[o];
+
+						switch (op.type) {
+							case X86_OP_IMM:
+							{
+								const auto target = static_cast<uintptr_t>(op.imm);
+								if (is_branch_instruction(insn->id)) {
+									cerr << (void*)(insn->address) << " + " << (int)detail_x86.encoding.imm_offset << " rel imm " << (int)detail_x86.encoding.imm_size << ": " << (void*)target << endl;
+
+									// Inside symbol?
+									if (target >= sym.address && target < sym.address + sym.size) {
+										// same symbol, hence just hash
+									} else {
+										// other symbol, add reference
+									}
+								}
+								break;
+							}
+
+							case X86_OP_MEM:
+								// Handle FS segment (TLS in Linux)
+								if (op.mem.segment == X86_REG_FS) {
+									auto tls_end = this->tls_segment.has_value() ? Math::align_up(this->tls_segment.value().virt_addr() + this->tls_segment.value().virt_size(), this->tls_segment.value().alignment()) : 0;
+									const auto target = Bean::TLS::trans_addr(tls_end + op.mem.disp, true);
+									cerr << (void*)(insn->address) << " + " << (int)detail_x86.encoding.disp_offset << " rel TLS " << (int)detail_x86.encoding.disp_size << ": " << (void*) op.mem.disp << endl;
+
+								}
+								// RIP relative memory access
+								if (op.mem.base == X86_REG_RIP) {
+									const auto target = insn->address + insn->size + op.mem.disp;
+									cerr << (void*)(insn->address) << " + " << (int)detail_x86.encoding.disp_offset << " rex " << (int)detail_x86.rex << " rel rip " << (int)detail_x86.encoding.disp_size << ": " << (void*)target << endl;
+								}
+								break;
+
+							default:
+								break;
+						}
+
+						//bool plt_name = this->debug && String::compare(section.name(), ".plt.", 5) == 0;
+
+					}
+				}
+
+			}
+			last_addr = sym.address;
+		}
+
+	}
+
 	/*! \brief Constructor */
 	AnalyzeX86(Bean::symtree_t & symbols, const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size)
 	 : Analyze<C>(symbols, elf, dbgsym, resolve_internal_relocations, debug, buffer_size) {

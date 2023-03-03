@@ -136,9 +136,9 @@ class Analyze {
 		}
 
 		auto pos = symbols.find(address);
-		if (!pos) {
+		if (!pos || (pos->type == Bean::Symbol::TYPE_NONE && is(bean_type).in(Bean::Symbol::TYPE_OBJECT, Bean::Symbol::TYPE_FUNC))) {
 			symbols.emplace(address, size, name, section_name, writeable, executable, bean_type, bean_bind);
-		} else {
+		} else if (bean_type != Bean::Symbol::TYPE_NONE || pos->type == Bean::Symbol::TYPE_UNKNOWN) {
 			if (pos->section.name == nullptr && section_name != nullptr)
 				pos->section.name = section_name;
 			if (pos->size == 0) {
@@ -415,6 +415,9 @@ class Analyze {
 	/*! \brief Find additional function start addresses (if possible) */
 	virtual void find_additional_functions() {}
 
+	/*! \brief try to reconstruct stripped relocations */
+	virtual void reconstruct_relocations() {}
+
 	/*! \brief Create internal identifier
 	 * by hashing all position independent bytes
 	 */
@@ -509,6 +512,9 @@ class Analyze {
 
 		// 2.5: Add symbols flags
 		add_flags();
+
+		// reconstruct relocations (if required)
+		reconstruct_relocations();
 
 		// 3. Calculate position independent id
 		hash_internal();
