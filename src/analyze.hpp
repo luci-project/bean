@@ -151,7 +151,7 @@ class Analyze {
 
 			if (bean_type != Bean::Symbol::TYPE_UNKNOWN && is(pos->type).in(Bean::Symbol::TYPE_UNKNOWN, Bean::Symbol::TYPE_SECTION, Bean::Symbol::TYPE_FILE, Bean::Symbol::TYPE_COMMON))
 				pos->type = bean_type;
-			assert(bean_type == Bean::Symbol::TYPE_UNKNOWN || pos->type == bean_type);
+			assert(bean_type == Bean::Symbol::TYPE_UNKNOWN || pos->type == bean_type || (is(pos->type).in(Bean::Symbol::TYPE_FUNC, Bean::Symbol::TYPE_INDIRECT_FUNC) && is(bean_type).in(Bean::Symbol::TYPE_FUNC, Bean::Symbol::TYPE_INDIRECT_FUNC)));
 
 			// Maximum bind wins
 			if (pos->bind < bean_bind)
@@ -514,7 +514,7 @@ class Analyze {
 		add_flags();
 
 		// reconstruct relocations (if required)
-		reconstruct_relocations();
+		//reconstruct_relocations();
 
 		// 3. Calculate position independent id
 		hash_internal();
