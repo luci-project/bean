@@ -72,7 +72,7 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 
 bool Bean::diet() {
 #ifdef BEAN_VERBOSE
-	return false
+	return false;
 #else
 	return true;
 #endif
