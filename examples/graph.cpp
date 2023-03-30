@@ -27,10 +27,11 @@ int main(int argc, const char *argv[]) {
 	// Check arguments
 	if (argc < 2) {
 		cerr << "Call/Dependency Graph of ELF binary (for Graphviz Dot)" << endl << endl
-		     << "   Usage: " << argv[0] << " [-c] [-f FONT] [-r] [-s] [-b FOLDER] [-v[v[v]]] ELF-FILE[S]"<< endl << endl
+		     << "   Usage: " << argv[0] << " [-c] [-e] [-E] [-f FONT] [-r] [-s] [-b FOLDER] [-v[v[v]]] ELF-FILE[S]"<< endl << endl
 		     << "Parameters:" << endl
 		     << "  -c    concentrate edges in dot output" << endl
 			 << "  -e    show external visible symbols" << endl
+			 << "  -E    highlight entry point" << endl
 		     << "  -f    font to use in dot output" << endl
 		     << "  -r    resolve (internal) relocations" << endl
 		     << "  -s    use (external) debug symbols" << endl
@@ -42,6 +43,7 @@ int main(int argc, const char *argv[]) {
 	}
 
 	Bean::Verbosity verbose = Bean::NONE;
+	bool entry = false;
 	bool reloc = false;
 	bool dbgsym = false;
 	bool external = false;
@@ -52,6 +54,8 @@ int main(int argc, const char *argv[]) {
 	for (int i = 1; i < argc; i++) {
 		if (String::compare(argv[i], "-e") == 0) {
 			external = true;
+		} else if (String::compare(argv[i], "-E") == 0) {
+			entry = true;
 		} else if (String::compare(argv[i], "-f") == 0) {
 			font = argv[++i];
 		} else if (String::compare(argv[i], "-r") == 0) {
@@ -136,10 +140,13 @@ int main(int argc, const char *argv[]) {
 			if (section != nullptr)
 				cout << "\t}" << endl;
 			if (external)
-				cout << "\textern [style=\"filled\" fillcolor=\"#000000\" fontcolor=\"#ffffff\" label=<<B>EXTERN</B>>]" << endl;
+				cout << "\textern [style=\"filled\" color=\"#0000ff\" fontcolor=\"#ffffff\" label=<<B>EXTERN</B>>]" << endl;
+			if (entry && file.bean.symbols.find(file.binary.content.header.entry()))
+				cout << "\tentry [shape=\"oval\" style=\"filled\" color=\"#ff0000\" fontcolor=\"#ffffff\" label=<<B>ENTRY</B>>] " << endl
+				     << "\tentry -> m" << hex << file.binary.content.header.entry() << " [arrowhead=\"open\" color=\"#ff0000\" penwidth=\"2\"]" << endl;
 			for (const auto & sym : file.bean.symbols) {
 				if (external && sym.bind == Bean::Symbol::BIND_GLOBAL)
-					cout << "\textern -> m" << hex << sym.address << " [arrowhead=dot penwidth=2]" << endl;
+					cout << "\textern -> m" << hex << sym.address << " [arrowhead=\"dot\" color=\"#0000ff\" penwidth=\"2\"]" << endl;
 				for (const auto & ref : sym.refs) {
 					auto ref_sym = file.bean.symbols.floor(ref);
 					if (ref_sym && Bean::TLS::is_tls(ref_sym->address) == Bean::TLS::is_tls(ref)) {
