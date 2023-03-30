@@ -11,6 +11,9 @@ class Analyze {
 	/*! \brief Pointer to buffer for debug stream */
 	char * const debug_buffer = nullptr;
 
+	/*! \brief Debug buffer size to allocate */
+	static const size_t debug_buffer_size = 1048576;
+
  protected:
 	/*! \brief Create detailed debug information for every symbol
 	 * \note Allocated memory will never be freed!
@@ -34,13 +37,14 @@ class Analyze {
 	/*! \brief Should internal relocations be resolved
 	 * \note security risk with irelative!
 	 */
-	const bool resolve_internal_relocations;
+	const uint32_t flags;
 
 	/*! \brief Temporary container for relevant sections of elf file */
 	TreeSet<typename ELF<C>::Section, Bean::SymbolAddressComparison> sections;
 
-	/*! \brief Temporary container for relevant relocations */
+	/*! \brief Temporary containers for relevant relocations */
 	TreeSet<typename ELF<C>::Relocation, Bean::SymbolAddressComparison> relocations;
+	TreeSet<uintptr_t, Bean::SymbolAddressComparison> relative_relocations;
 
 	/*! \brief Temporary container for relevant load segments of elf file */
 	TreeSet<typename ELF<C>::Segment, Bean::SymbolAddressComparison> segments;
@@ -65,19 +69,14 @@ class Analyze {
 	Optional<typename ELF<C>::Segment> tls_segment;
 
 	/*! \brief Constructor */
-	Analyze(Bean::symtree_t & symbols, const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) :
+	Analyze(Bean::symtree_t & symbols, const ELF<C> &elf, const ELF<C> * dbgsym, uint32_t flags) :
 #ifdef BEAN_VERBOSE
-	  debug_buffer(debug ? Memory::alloc<char>(buffer_size) : nullptr), debug(debug), debug_stream(debug_buffer, buffer_size),
+	  debug_buffer((flags & Bean::FLAG_DEBUG) != 0 ? Memory::alloc<char>(debug_buffer_size) : nullptr), debug((flags & Bean::FLAG_DEBUG) != 0), debug_stream(debug_buffer, debug_buffer_size),
 #endif
-	  symbols(symbols), elf(elf), dbgsym(dbgsym), resolve_internal_relocations(resolve_internal_relocations) {
+	  symbols(symbols), elf(elf), dbgsym(dbgsym), flags(flags) {
 		assert(elf.header.valid());
-		(void) debug;
 #ifdef BEAN_VERBOSE
-		if (debug)
-			assert(debug_buffer != nullptr);
-#else
-		(void) buffer_size;
-		assert(!debug && "debug data not available in DIET mode");
+		assert((this->flags & Bean::FLAG_DEBUG) == 0 || debug_buffer != nullptr);
 #endif
 		if (dbgsym != nullptr) {
 			assert(dbgsym->header.valid());
@@ -205,6 +204,8 @@ class Analyze {
 					section_flags.emplace_back(Bean::Symbol::Section::SECTION_DYNAMIC, segment.virt_addr(), segment.virt_size());
 					size_t rel_start = 0;
 					size_t rel_size = 0;
+					size_t relr_start = 0;
+					size_t relr_size = 0;
 					size_t strtab_start = 0;
 					size_t strtab_size = 0;
 					size_t preinit_array_start = 0;
@@ -228,6 +229,14 @@ class Analyze {
 							case ELF<C>::DT_RELSZ:
 							case ELF<C>::DT_RELASZ:
 								rel_size = dyn.value();
+								break;
+
+							case ELF<C>::DT_RELR:
+								relr_start = dyn.value();
+								break;
+
+							case ELF<C>::DT_RELRSZ:
+								relr_size = dyn.value();
 								break;
 
 							case ELF<C>::DT_STRTAB:
@@ -265,6 +274,8 @@ class Analyze {
 						}
 					if (rel_size != 0 )
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELOC, rel_start, rel_size);
+					if (relr_size != 0 )
+						section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELOC, relr_start, relr_size);
 					if (strtab_size != 0 )
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_STRTAB, strtab_start, strtab_size);
 					if (preinit_array_size != 0 )
@@ -316,6 +327,13 @@ class Analyze {
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELOC, section.virt_addr(), section.size());
 					for (const auto & entry : section.get_relocations())
 						relocations.emplace(entry);
+					break;
+
+				case ELF<C>::SHT_RELR:
+					if (add_sections)
+						section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELOC, section.virt_addr(), section.size());
+					for (const auto & entry : section.get_relative_relocations())
+						relative_relocations.insert(entry.offset());
 					break;
 
 				case ELF<C>::SHT_HASH:
@@ -402,10 +420,13 @@ class Analyze {
 
 	/*! \brief Mark symbols in relocation read-only section */
 	virtual void add_flags() {
-		for (auto & sym : symbols)
+		for (auto & sym : symbols) {
+			// Mark symbols in relocation read-only section
 			for (auto & section_flag : section_flags)
 				if (sym.address >= section_flag.start && sym.address + sym.size < section_flag.start + section_flag.size)
 					sym.section.flags |= section_flag.flag;
+
+		}
 	}
 
 	/*! \brief Additional read operation, arch depending */
@@ -512,13 +533,15 @@ class Analyze {
 		// 2.5: Add symbols flags
 		add_flags();
 
-		// reconstruct relocations (if required)
-		//reconstruct_relocations();
-
 		// 3. Calculate position independent id
 		hash_internal();
 
 		// 4. Calculate full id using references & relocations
 		hash_external();
+
+		// 5. reconstruct relocations (if required)
+		if ((this->flags & Bean::FLAG_RECONSTRUCT_RELOCATIONS) != 0)
+			reconstruct_relocations();
+
 	}
 };

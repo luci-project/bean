@@ -1,12 +1,14 @@
 #include <bean/bean.hpp>
 
+#include <dlh/is_in.hpp>
+
 #include "analyze.hpp"
 #include "analyze_x86.hpp"
 #include "capstone.hpp"
 
 
 template<ELFCLASS C>
-Bean::symtree_t analyze(const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) {
+static Bean::symtree_t analyze(const ELF<C> &elf, const ELF<C> * dbgsym, uint32_t flags) {
 	// Result
 	Bean::symtree_t symbols;
 
@@ -15,7 +17,7 @@ Bean::symtree_t analyze(const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_i
 			case Elf::EM_386:
 			case Elf::EM_486:
 			case Elf::EM_X86_64:
-				AnalyzeX86(symbols, elf, dbgsym, resolve_internal_relocations, debug, buffer_size).run();
+				AnalyzeX86(symbols, elf, dbgsym, flags).run();
 				break;
 
 			default:
@@ -29,8 +31,8 @@ Bean::symtree_t analyze(const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_i
 	return symbols;
 }
 
-Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Relocation & relocation, bool resolve_target, uintptr_t global_offset_table)
-  : offset(relocation.offset()), type(relocation.type()), name(nullptr), addend(relocation.addend()), target(0), undefined(false) {
+Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Relocation & relocation, ELF_Def::Constants::ehdr_machine machine, bool resolve_target, uintptr_t global_offset_table)
+  : offset(relocation.offset()), type(relocation.type()), name(nullptr), addend(relocation.addend()), target(0), machine(machine), undefined(false), reconstructed(false) {
 	assert(relocation.valid());
 
 	// Get relocation symbol
@@ -40,22 +42,16 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 		undefined = (rel_sym.section_index() == ELF<ELF_Def::Identification::ELFCLASS32>::SHN_UNDEF);
 	}
 
-	if (!undefined)
-		switch (relocation.type()) {
-			case ELF<ELF_Def::Identification::ELFCLASS32>::R_X86_64_RELATIVE:
-			case ELF<ELF_Def::Identification::ELFCLASS32>::R_X86_64_RELATIVE64:
-				target = addend;
-				break;
-
-			default:
-				// Perform relocation
-				if (resolve_target)
-					target = Relocator(relocation, global_offset_table).value(0);
-		}
+	if (!undefined) {
+		if (is(machine).in(Elf::EM_386, Elf::EM_486) && relocation.type() == ELF<ELF_Def::Identification::ELFCLASS64>::R_386_RELATIVE)
+			target = addend;
+		else if (resolve_target)
+			target = Relocator(relocation, global_offset_table).value(0);
+	}
 }
 
-Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Relocation & relocation, bool resolve_target, uintptr_t global_offset_table)
-  : offset(relocation.offset()), type(relocation.type()), name(nullptr), addend(relocation.addend()), target(0), undefined(false) {
+Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Relocation & relocation, ELF_Def::Constants::ehdr_machine machine, bool resolve_target, uintptr_t global_offset_table)
+  : offset(relocation.offset()), type(relocation.type()), name(nullptr), addend(relocation.addend()), target(0), machine(machine), undefined(false), reconstructed(false) {
 	assert(relocation.valid());
 
 	// Get relocation symbol
@@ -66,18 +62,20 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 	}
 
 	// Perform relocation
-	if (!undefined)
-		switch (relocation.type()) {
-			case ELF<ELF_Def::Identification::ELFCLASS64>::R_X86_64_RELATIVE:
-			case ELF<ELF_Def::Identification::ELFCLASS64>::R_X86_64_RELATIVE64:
-				target = addend;
-				break;
+	if (!undefined) {
+		if (machine == Elf::EM_X86_64 && is(relocation.type()).in(ELF<ELF_Def::Identification::ELFCLASS64>::R_X86_64_RELATIVE, ELF<ELF_Def::Identification::ELFCLASS64>::R_X86_64_RELATIVE64))
+			target = addend;
+		else if (resolve_target)
+			target = Relocator(relocation, global_offset_table).value(0);
+	}
+}
 
-			default:
-				// Perform relocation
-				if (resolve_target)
-					target = Relocator(relocation, global_offset_table).value(0);
-		}
+bool Bean::diet() {
+#ifdef BEAN_VERBOSE
+	return false
+#else
+	return true;
+#endif
 }
 
 const Bean::symtree_t Bean::diff(const Bean & other, bool include_dependencies, Bean::ComparisonMode mode) const {
@@ -116,6 +114,6 @@ const Bean::symtree_t Bean::diff(const Bean & other, bool include_dependencies, 
 	}
 }
 
-Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, const ELF<ELF_Def::Identification::ELFCLASS32> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) : symbols(analyze(elf, dbgsym, resolve_internal_relocations, debug, buffer_size)) {}
+Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, const ELF<ELF_Def::Identification::ELFCLASS32> * dbgsym, uint32_t flags) : symbols(analyze(elf, dbgsym, flags)) {}
 
-Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, const ELF<ELF_Def::Identification::ELFCLASS64> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size) : symbols(analyze(elf, dbgsym, resolve_internal_relocations, debug, buffer_size)) {}
+Bean::Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, const ELF<ELF_Def::Identification::ELFCLASS64> * dbgsym, uint32_t flags) : symbols(analyze(elf, dbgsym, flags)) {}

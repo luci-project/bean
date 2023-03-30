@@ -27,24 +27,27 @@ int main(int argc, const char *argv[]) {
 	// Check arguments
 	if (argc < 2) {
 		cerr << "Call/Dependency Graph of ELF binary (for Graphviz Dot)" << endl << endl
-		     << "   Usage: " << argv[0] << " [-c] [-e] [-E] [-f FONT] [-r] [-s] [-b FOLDER] [-v[v[v]]] ELF-FILE[S]"<< endl << endl
+		     << "   Usage: " << argv[0] << " [-c] [-e] [-E] [-f FONT] [-r] [-s] [-k] [-b FOLDER] [-v[v[v]]] ELF-FILE[S]"<< endl << endl
 		     << "Parameters:" << endl
 		     << "  -c    concentrate edges in dot output" << endl
-			 << "  -e    show external visible symbols" << endl
-			 << "  -E    highlight entry point" << endl
+		     << "  -e    show external visible symbols" << endl
+		     << "  -E    highlight entry point" << endl
 		     << "  -f    font to use in dot output" << endl
 		     << "  -r    resolve (internal) relocations" << endl
 		     << "  -s    use (external) debug symbols" << endl
+		     << "  -k    keep unused symbols" << endl
 		     << "  -b    base directory to search for debug files" << endl
 		     << "  -v    cluster sections" << endl
 		     << "  -vv   ... and show offsets" << endl
 		     << "  -vvv  ... and show all references and relocations" << endl;
+		if (Bean::diet())
+			cerr << "[Diet build]" << endl;
 		return EXIT_FAILURE;
 	}
 
 	Bean::Verbosity verbose = Bean::NONE;
+	uint32_t flags = Bean::FLAG_NONE;
 	bool entry = false;
-	bool reloc = false;
 	bool dbgsym = false;
 	bool external = false;
 	bool concentrate = false;
@@ -59,9 +62,11 @@ int main(int argc, const char *argv[]) {
 		} else if (String::compare(argv[i], "-f") == 0) {
 			font = argv[++i];
 		} else if (String::compare(argv[i], "-r") == 0) {
-			reloc = true;
+			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
 		} else if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
+		} else if (String::compare(argv[i], "-k") == 0) {
+			flags |= Bean::FLAG_KEEP_UNUSED_SYMBOLS;
 		} else if (String::compare(argv[i], "-b") == 0) {
 			base = argv[++i];
 		} else if (String::compare(argv[i], "-c") == 0) {
@@ -79,7 +84,7 @@ int main(int argc, const char *argv[]) {
 			cerr << "Unsupported parameter '" << argv[i] << endl;
 			return EXIT_FAILURE;
 		} else {
-			BeanFile file(argv[i], dbgsym, reloc, true, base);
+			BeanFile file(argv[i], dbgsym, flags, base);
 
 			cout << "digraph " << normalize(argv[i]) << " {" << endl
 			     << "\tnode [shape=rectangle fontname=\"" << font << "\"]" << endl

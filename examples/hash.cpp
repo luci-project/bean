@@ -7,27 +7,36 @@ int main(int argc, const char *argv[]) {
 	// Check arguments
 	if (argc < 2) {
 		cerr << "Hash ELF binary" << endl << endl
-		     << "   Usage: " << argv[0] << " [-r] [-s] [-b FOLDER] [-v[v[v]]] ELF-FILE[S]"<< endl << endl
+		     << "   Usage: " << argv[0] << " [-r] [-R] [-s] [-k] [-b FOLDER] [-v[v[v]]] ELF-FILE[S]"<< endl << endl
 		     << "Parameters:" << endl
 		     << "  -r    resolve (internal) relocations" << endl
+		     << "  -R    reconstruct relocations" << endl
 		     << "  -s    use (external) debug symbols" << endl
+		     << "  -k    keep unused symbols" << endl
 	         << "  -b    base directory to search for debug files" << endl
 		     << "  -v    list address and names" << endl
 		     << "  -vv   ... and dissassemble code" << endl
 		     << "  -vvv  ... and show all references and relocations" << endl;
+		if (Bean::diet())
+			cerr << "[Diet build with limited functionality]" << endl;
 		return EXIT_FAILURE;
 	}
 
 	Bean::Verbosity verbose = Bean::NONE;
+	uint32_t flags = Bean::FLAG_NONE;
 	bool reloc = false;
 	bool dbgsym = false;
 	const char * base = nullptr;
 
 	for (int i = 1; i < argc; i++) {
 		if (String::compare(argv[i], "-r") == 0) {
-			reloc = true;
+			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
+		} else if (String::compare(argv[i], "-R") == 0) {
+			flags |= Bean::FLAG_RECONSTRUCT_RELOCATIONS;
 		} else if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
+		} else if (String::compare(argv[i], "-k") == 0) {
+			flags |= Bean::FLAG_KEEP_UNUSED_SYMBOLS;
 		} else if (String::compare(argv[i], "-b") == 0) {
 			base = argv[++i];
 		} else if (String::compare(argv[i], "-v", 2) == 0) {
@@ -43,7 +52,7 @@ int main(int argc, const char *argv[]) {
 			cerr << "Unsupported parameter '" << argv[i] << endl;
 			return EXIT_FAILURE;
 		} else {
-			BeanFile file(argv[i], dbgsym, reloc, true, base);
+			BeanFile file(argv[i], dbgsym, flags, base);
 			cout << "# " << file.binary.path << " (" << file.binary.size << " bytes):" << endl;
 			file.bean.dump(cout, verbose);
 			cout << endl;

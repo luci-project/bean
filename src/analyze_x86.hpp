@@ -20,34 +20,40 @@ class AnalyzeX86 : public Analyze<C> {
 
 	/*! \brief use Relocation targets to identify additional symbols */
 	void read() {
-		for (const auto & rel : this->relocations)
-			switch (rel.type()) {
-				case ELF<C>::R_X86_64_RELATIVE:
-				case ELF<C>::R_X86_64_RELATIVE64:
-				case ELF<C>::R_X86_64_IRELATIVE:
-				{
+		for (const auto & rel : this->relocations) {
+			if (rel.type() == ELF<C>::R_X86_64_RELATIVE ||
+			    rel.type() == ELF<C>::R_X86_64_RELATIVE64 ||
+				rel.type() == ELF<C>::R_X86_64_IRELATIVE) {
 					auto sec = this->sections.floor(static_cast<uintptr_t>(rel.addend()));
 					assert(sec);
 					assert(rel.type() != ELF<C>::R_X86_64_IRELATIVE || sec->executable());
 					assert(!sec->tls());
 					this->insert_symbol(rel.addend(), 0, nullptr, sec->name(), sec->writeable(), sec->executable());
-					// fall through
-					__attribute__((__fallthrough__));
 				}
 #ifdef BEAN_VERBOSE
-				default:
-					if (this->debug) {
-						// Verify only writeable data sections are relocated
-						auto sec = this->sections.floor(static_cast<uintptr_t>(rel.offset()));
-						assert(sec);
-						assert(sec->allocate());
-						if (!sec->writeable())
-							cerr << "Warning: Relocation of type " << (int)rel.type() << " at " << (void*)rel.offset() << " in non-writeable section " << sec->name() << endl;
+/*
+				if (this->debug) {
+					// Verify only writeable data sections are relocated
+					auto sec = this->sections.floor(static_cast<uintptr_t>(rel.offset()));
+					assert(sec);
+					assert(sec->allocate());
+					if (!sec->writeable())
+						cerr << "Warning: Relocation of type " << (int)rel.type() << " at " << (void*)rel.offset() << " in non-writeable section " << sec->name() << endl;
 
-						assert(!sec->executable());
-					}
+					//assert(!sec->executable());
+				}
+					*/
 #endif
-			}
+		}
+		for (auto offset : this->relative_relocations) {
+			auto rel_sec = this->sections.floor(static_cast<uintptr_t>(offset));
+			assert(rel_sec);
+			const uintptr_t addend = *reinterpret_cast<const uintptr_t *>(reinterpret_cast<uintptr_t>(rel_sec->data()) + (offset - rel_sec->virt_addr()));
+			auto addend_sec = this->sections.floor(static_cast<uintptr_t>(addend));
+			if (addend_sec)
+				this->insert_symbol(addend, 0, nullptr, addend_sec->name(), addend_sec->writeable(), addend_sec->executable());
+		}
+
 	}
 
 	/*! \brief Find additional function start addresses
@@ -165,6 +171,26 @@ class AnalyzeX86 : public Analyze<C> {
 	}
 
  private:
+	void add_relocations(Bean::Symbol & sym, const typename ELF<C>::Section & section, uintptr_t address) {
+		// "Classic" relocations
+		for (auto relocation = this->relocations.ceil(sym); relocation != this->relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
+			auto r = sym.rels.emplace(*relocation, this->elf.header.machine(), (this->flags & Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS) != 0, this->global_offset_table);
+			// Add local (internal) relocation as reference
+			if (r.second && (this->flags & Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS) != 0 && !r.first->undefined)
+				sym.refs.insert(r.first->target);
+		}
+
+		// Relative relocations
+		for (auto relocation = this->relative_relocations.ceil(sym); relocation != this->relative_relocations.end() && *relocation < address + sym.size; ++relocation) {
+			uintptr_t offset = *relocation;
+			const uintptr_t addend = *reinterpret_cast<const uintptr_t *>(reinterpret_cast<uintptr_t>(section.data()) + (offset - section.virt_addr()));
+			auto r = sym.rels.emplace(offset, static_cast<uintptr_t>(ELF<C>::R_X86_64_RELATIVE), this->elf.header.machine(), nullptr, addend, false, addend);
+			// Add local (internal) relocation as reference
+			if (r.second && (this->flags & Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS) != 0 && !r.first->undefined)
+				sym.refs.insert(r.first->target);
+		}
+	}
+
 	static bool is_branch_instruction(unsigned int instruction) {
 		switch (instruction) {
 			case X86_INS_JAE:
@@ -348,7 +374,7 @@ class AnalyzeX86 : public Analyze<C> {
 							if (r->addend != 0)
 								this->debug_stream << " + " << dec << r->addend;
 						} else {
-							Bean::dump_address(this->debug_stream, this->resolve_internal_relocations ? r->target : r->addend, this->symbols);
+							Bean::dump_address(this->debug_stream, (this->flags & Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS) != 0 ? r->target : r->addend, this->symbols);
 						}
 						this->debug_stream << "\e[0m";
 					}
@@ -392,6 +418,7 @@ class AnalyzeX86 : public Analyze<C> {
 		// Iterate over all symbols
 		size_t last_addr = SIZE_MAX;
 		ByteBuffer<128> hashbuf;
+		Vector<uintptr_t> unused;
 
 		for (auto & sym : reverse(this->symbols)) {
 			// Load corresponding section
@@ -416,14 +443,17 @@ class AnalyzeX86 : public Analyze<C> {
 			const size_t max_size = max_addr - sym.address;
 			if (max_size > sym.size)
 				sym.size = max_size;
-
 			// 3b. generate links (from jmp + call) & hash
 			const size_t offset = address - section->virt_addr();
 			const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
 			XXHash64 id_internal(0);  // TODO seed
+			bool content = false;
 			if (sym.section.executable) {
 				// TLS cannot be executable
 				assert(!section->tls());
+
+				// Relocations here are unlikely, but possible (link with `-q`)
+				add_relocations(sym, *section, address);
 
 				size_t size = sym.size;
 				bool leave = true;
@@ -456,6 +486,7 @@ class AnalyzeX86 : public Analyze<C> {
 							leave = false;
 					}
 					last_instruction = address;  // Ignores nop
+					content = true;
 
 					// Buffer for id hash
 					hashbuf.clear();
@@ -582,6 +613,8 @@ class AnalyzeX86 : public Analyze<C> {
 					sym.refs.insert(next->address);
 				}
 			} else {
+				content = true;
+
 				// 3c. Link relocations to (data) symbols
 				bool is_bss = section->type() == ELF<C>::SHT_NOBITS;
 				typename ELF<C>::Segment &seg = section->tls() ? this->tls_segment.value() : *this->segments.floor(address);
@@ -589,13 +622,9 @@ class AnalyzeX86 : public Analyze<C> {
 				if (address >= seg.virt_addr() + seg.size())
 					is_bss = true;
 
+				// There shouldn't be any in .bss --> it would be moved to data
 				if (!is_bss)
-					for (auto relocation = this->relocations.ceil(sym); relocation != this->relocations.end() && relocation->offset() < address + sym.size; ++relocation) {
-						auto r = sym.rels.emplace(*relocation, this->resolve_internal_relocations, this->global_offset_table);
-						// Add local (internal) relocation as reference
-						if (r.second && this->resolve_internal_relocations && !r.first->undefined)
-							sym.refs.insert(r.first->target);
-					}
+					add_relocations(sym, *section, address);
 
 
 				// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
@@ -639,21 +668,113 @@ class AnalyzeX86 : public Analyze<C> {
 					hash_internal_debug_data(sym, data, is_bss);
 #endif
 			}
-#ifdef BEAN_VERBOSE
-			// Allocate debug buffer
-			if (this->debug)
-				hash_internal_debug_strdup(sym);
-#endif
-			// Calculate has
-			sym.id.internal = id_internal.hash();
-
+			// store symbol address
 			last_addr = sym.address;
+
+			// if there are no contents in symbol -> unused
+			if (!content && (this->flags & Bean::FLAG_KEEP_UNUSED_SYMBOLS) == 0 && sym.name == nullptr && sym.deps.size() == 0 && sym.refs.size() == 0 && sym.rels.size() == 0) {
+				unused.push_back(sym.address);
+			} else {
+#ifdef BEAN_VERBOSE
+				// Allocate debug buffer
+				if (this->debug)
+					hash_internal_debug_strdup(sym);
+#endif
+
+				// Calculate hash
+				sym.id.internal = id_internal.hash();
+			}
 		}
 
+		// remove unused symbosl from list
+		for (auto address : unused)
+			this->symbols.erase(address);
+	}
+
+ private:
+	bool create_relocation(Bean::Symbol & sym, uintptr_t offset, uintptr_t target, uint8_t size, intptr_t addend) {
+		// Skip internal relocations (referencing inside a function, e.g. loops)
+		if (target >= sym.address && target < sym.address + sym.size)
+			return false;
+
+		// Skip existing relocations
+		if (sym.rels.contains(offset))
+			return false;
+
+		auto type = ELF<C>::R_X86_64_NONE;
+		const char * symbol_name = nullptr;
+		const char * section_name = nullptr;
+
+		if (auto sym = this->symbols.find(target)) {
+			symbol_name = sym->name;
+			section_name = sym->section.name;
+		}
+		if (section_name == nullptr) {
+			if (auto sec = this->sections.floor(target))
+				section_name = sec->name();
+		}
+
+		if (size == 4 && section_name != nullptr) {
+			if (String::compare(section_name, ".plt", 4) == 0) {
+				type = ELF<C>::R_X86_64_PLT32;
+			} else if (String::compare(section_name, ".got", 4) == 0) {
+				type = ELF<C>::R_X86_64_GOTPCREL;
+				if (auto rel = this->relocations.find(target)) {
+					if (rel->symbol_index() != 0) {
+						// Get relocation symbol
+						const auto rel_sym = rel->symbol();
+						if (rel_sym.section_index() == ELF<C>::SHN_UNDEF)
+							symbol_name = rel_sym.name();
+					}
+				}
+			}
+		}
+		if (symbol_name == nullptr) {
+			auto sym = this->symbols.floor(target);
+			if (sym) {
+				symbol_name = sym->name;
+				if (symbol_name == nullptr) {
+					if (sym->section.executable) {
+						// TODO: This is never freed...
+						auto buf = reinterpret_cast<char*>(Memory::alloc(18));
+						BufferStream(buf, 18) << '#' << setfill('0') << hex << setw(16) << sym->id.internal << flush;
+						symbol_name = sym->name = buf;
+					} else {
+						symbol_name = sym->section.name;
+					}
+				}
+				addend += target - sym->address;
+			} else if (type == ELF<C>::R_X86_64_NONE) {
+				if (size == 4) {
+					type = ELF<C>::R_X86_64_RELATIVE;
+				} else if (size == 8) {
+					type = ELF<C>::R_X86_64_RELATIVE64;
+				}
+			}
+		}
+		if (symbol_name != nullptr && type == ELF<C>::R_X86_64_NONE) {
+			switch (size) {
+				case 1:
+					type = ELF<C>::R_X86_64_PC8;
+					break;
+				case 2:
+					type = ELF<C>::R_X86_64_PC16;
+					break;
+				case 4:
+					type = ELF<C>::R_X86_64_PC32;
+					break;
+				case 8:
+					type = ELF<C>::R_X86_64_PC64;
+					break;
+			}
+		}
+		return sym.rels.emplace(offset, type, this->elf.header.machine(), symbol_name, addend, false, target, true).second;
 	}
 
  public:
 	void reconstruct_relocations() {
+		bool skip_internal = true;
+		bool skip_existing = true;
 		// Iterate over all symbols
 		size_t last_addr = SIZE_MAX;
 
@@ -669,7 +790,11 @@ class AnalyzeX86 : public Analyze<C> {
 				sym.section.writeable = section->writeable();
 			}
 
-			// 3a. calculate size (if 0), TODO: ignore nops!
+			// Skip PLT section
+			if (String::compare(sym.section.name, ".plt", 4) == 0)
+				continue;
+
+			// calculate size
 			const size_t max_addr = Math::min(last_addr, Bean::TLS::trans_addr(Math::align_up(section->virt_addr() + section->size(), section->alignment()), section->tls()));
 			uintptr_t address = Bean::TLS::virt_addr(sym.address);
 			assert(max_addr >= sym.address);
@@ -685,6 +810,8 @@ class AnalyzeX86 : public Analyze<C> {
 				assert(!section->tls());
 
 				size_t size = sym.size;
+
+				cerr << "Checkin Symbol " << sym.name << " @ " << (void*)address << " : " << size << endl;
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
 					auto & detail_x86 = insn->detail->x86;
 
@@ -694,42 +821,26 @@ class AnalyzeX86 : public Analyze<C> {
 
 						switch (op.type) {
 							case X86_OP_IMM:
-							{
-								const auto target = static_cast<uintptr_t>(op.imm);
-								if (is_branch_instruction(insn->id)) {
-									cerr << (void*)(insn->address) << " + " << (int)detail_x86.encoding.imm_offset << " rel imm " << (int)detail_x86.encoding.imm_size << ": " << (void*)target << endl;
-
-									// Inside symbol?
-									if (target >= sym.address && target < sym.address + sym.size) {
-										// same symbol, hence just hash
-									} else {
-										// other symbol, add reference
-									}
-								}
+								if (is_branch_instruction(insn->id))
+									create_relocation(sym, insn->address + detail_x86.encoding.imm_offset, static_cast<uintptr_t>(op.imm), detail_x86.encoding.imm_size, -1 * (insn->size - detail_x86.encoding.imm_offset));
 								break;
-							}
 
 							case X86_OP_MEM:
 								// Handle FS segment (TLS in Linux)
 								if (op.mem.segment == X86_REG_FS) {
 									auto tls_end = this->tls_segment.has_value() ? Math::align_up(this->tls_segment.value().virt_addr() + this->tls_segment.value().virt_size(), this->tls_segment.value().alignment()) : 0;
 									const auto target = Bean::TLS::trans_addr(tls_end + op.mem.disp, true);
-									cerr << (void*)(insn->address) << " + " << (int)detail_x86.encoding.disp_offset << " rel TLS " << (int)detail_x86.encoding.disp_size << ": " << (void*) op.mem.disp << endl;
+									cerr << (void*)(insn->address) << " + " << (int)detail_x86.encoding.disp_offset << " / " << insn->size << " rel TLS " << (int)detail_x86.encoding.disp_size << ": " << (void*) op.mem.disp << endl;
 
 								}
 								// RIP relative memory access
-								if (op.mem.base == X86_REG_RIP) {
-									const auto target = insn->address + insn->size + op.mem.disp;
-									cerr << (void*)(insn->address) << " + " << (int)detail_x86.encoding.disp_offset << " rex " << (int)detail_x86.rex << " rel rip " << (int)detail_x86.encoding.disp_size << ": " << (void*)target << endl;
-								}
+								if (op.mem.base == X86_REG_RIP)
+									create_relocation(sym, insn->address + detail_x86.encoding.disp_offset, insn->address + insn->size + op.mem.disp, detail_x86.encoding.disp_size, -1 * (insn->size - detail_x86.encoding.disp_offset));
 								break;
 
 							default:
 								break;
 						}
-
-						//bool plt_name = this->debug && String::compare(section.name(), ".plt.", 5) == 0;
-
 					}
 				}
 
@@ -740,8 +851,8 @@ class AnalyzeX86 : public Analyze<C> {
 	}
 
 	/*! \brief Constructor */
-	AnalyzeX86(Bean::symtree_t & symbols, const ELF<C> &elf, const ELF<C> * dbgsym, bool resolve_internal_relocations, bool debug, size_t buffer_size)
-	 : Analyze<C>(symbols, elf, dbgsym, resolve_internal_relocations, debug, buffer_size) {
+	AnalyzeX86(Bean::symtree_t & symbols, const ELF<C> &elf, const ELF<C> * dbgsym, uint32_t flags)
+	 : Analyze<C>(symbols, elf, dbgsym, flags) {
 		// Prepare disassembler: Open Handle
 		assert(elf.header.ident_class() != ELF<C>::ELFCLASSNONE);
 		if (::cs_open(CS_ARCH_X86, elf.header.ident_class() == ELF<C>::ELFCLASS32 ? CS_MODE_32 : CS_MODE_64, &cshandle) != CS_ERR_OK)

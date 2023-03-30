@@ -11,15 +11,15 @@ struct Diff {
 	Bean::syminthash_t a_internal, b_internal;
 	Bean::symhash_t a_extended, b_extended;
 	bool include_dependencies;
-	bool resolve_internal_relocations;
+	uint32_t flags;
 	Bean::ComparisonMode comparison_mode;
 
-	Diff(const char * a_base, const char * a_path, const char * b_base, const char * b_path, bool dbgsym, bool reloc, bool dependencies, Bean::ComparisonMode comparison_mode) :
-		a_file(a_path, dbgsym, reloc, false, a_base), b_file(b_path == nullptr ? a_path : b_path , dbgsym, reloc, false, b_base == nullptr ? a_base : b_base),
+	Diff(const char * a_base, const char * a_path, const char * b_base, const char * b_path, bool dbgsym, uint32_t flags, bool dependencies, Bean::ComparisonMode comparison_mode) :
+		a_file(a_path, dbgsym, flags, a_base), b_file(b_path == nullptr ? a_path : b_path, dbgsym, flags, b_base == nullptr ? a_base : b_base),
 		a_buildid(a_file.binary.content), b_buildid(b_file.binary.content),
 		a_internal(a_file.bean.diff_internal(b_file.bean, dependencies)), b_internal(b_file.bean.diff_internal(a_file.bean, dependencies)),
 		a_extended(a_file.bean.diff_extended(b_file.bean, dependencies)), b_extended(b_file.bean.diff_extended(a_file.bean, dependencies)),
-		include_dependencies(dependencies), resolve_internal_relocations(reloc), comparison_mode(comparison_mode) {
+		include_dependencies(dependencies), flags(flags), comparison_mode(comparison_mode) {
 		assert(b_base != nullptr || b_path != nullptr);
 	}
 
@@ -84,7 +84,7 @@ struct Diff {
 		print_startline(1);
 		cout << "\"settings\": {";
 		print_startline(2);
-		cout << "\"resolve_internal_relocations\": \"" << resolve_internal_relocations << "\",";
+		cout << "\"resolve_internal_relocations\": \"" << ((flags & Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS) != 0) << "\",";
 		print_startline(2);
 		cout << "\"include_dependencies\": \"" << include_dependencies << "\",";
 		print_startline(2);
@@ -147,9 +147,9 @@ struct Diff {
 
 int main(int argc, const char *argv[]) {
 	Bean::ComparisonMode comparison_mode = Bean::COMPARE_EXTENDED;
+	uint32_t flags = Bean::FLAG_NONE;
 	bool dependencies = false;
 	bool dbgsym = false;
-	bool reloc = false;
 	const char * old_base = nullptr;
 	const char * new_base = nullptr;
 	const char * old_path = nullptr;
@@ -163,7 +163,7 @@ int main(int argc, const char *argv[]) {
 		} else if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
 		} else if (String::compare(argv[i], "-r") == 0) {
-			reloc = true;
+			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
 		} else if (String::compare(argv[i], "-i", 2) == 0) {
 			for (size_t j = 1; argv[i][j] != '\0'; j++) {
 				if (argv[i][j] == 'i') {
@@ -209,7 +209,7 @@ int main(int argc, const char *argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	Diff(old_base, old_path, new_base, new_path, dbgsym, reloc, dependencies, comparison_mode).print();
+	Diff(old_base, old_path, new_base, new_path, dbgsym, flags, dependencies, comparison_mode).print();
 
 	return EXIT_SUCCESS;
 }

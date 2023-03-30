@@ -66,10 +66,10 @@ struct BeanFile {
 
 	Bean bean;
 
-	BeanFile(const char * path, bool load_debug_symbols = false, bool resolve_relocations = true, bool debug = false, const char * root = nullptr)
+	BeanFile(const char * path, bool load_debug_symbols = false, uint32_t flags = Bean::FLAG_NONE, const char * root = nullptr)
 	  : binary(resolve(path, root)),
 	    dbgsym(load_debug_symbols ? debug_symbols(root) : nullptr),
-	    bean(binary.content, dbgsym != nullptr ? &(dbgsym->content) : nullptr, resolve_relocations, debug) {}
+	    bean(binary.content, dbgsym != nullptr ? &(dbgsym->content) : nullptr, flags) {}
 
 	~BeanFile() {
 		// Cleanup

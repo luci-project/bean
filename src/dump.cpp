@@ -1,5 +1,108 @@
 #include <bean/bean.hpp>
 
+static bool dump_relocation(BufferStream & bs, uintptr_t type, ELF_Def::Constants::ehdr_machine machine) {
+	switch (machine) {
+		case Elf::EM_386:
+		case Elf::EM_486:
+			switch (type) {
+				case ELF_Def::Constants::R_386_NONE:          bs << "R_386_NONE";          return true;
+				case ELF_Def::Constants::R_386_32:            bs << "R_386_32";            return true;
+				case ELF_Def::Constants::R_386_PC32:          bs << "R_386_PC32";          return true;
+				case ELF_Def::Constants::R_386_GOT32:         bs << "R_386_GOT32";         return true;
+				case ELF_Def::Constants::R_386_PLT32:         bs << "R_386_PLT32";         return true;
+				case ELF_Def::Constants::R_386_COPY:          bs << "R_386_COPY";          return true;
+				case ELF_Def::Constants::R_386_GLOB_DAT:      bs << "R_386_GLOB_DAT";      return true;
+				case ELF_Def::Constants::R_386_JMP_SLOT:      bs << "R_386_JMP_SLOT";      return true;
+				case ELF_Def::Constants::R_386_RELATIVE:      bs << "R_386_RELATIVE";      return true;
+				case ELF_Def::Constants::R_386_GOTOFF:        bs << "R_386_GOTOFF";        return true;
+				case ELF_Def::Constants::R_386_GOTPC:         bs << "R_386_GOTPC";         return true;
+				case ELF_Def::Constants::R_386_32PLT:         bs << "R_386_32PLT";         return true;
+				case ELF_Def::Constants::R_386_TLS_TPOFF:     bs << "R_386_TLS_TPOFF";     return true;
+				case ELF_Def::Constants::R_386_TLS_IE:        bs << "R_386_TLS_IE";        return true;
+				case ELF_Def::Constants::R_386_TLS_GOTIE:     bs << "R_386_TLS_GOTIE";     return true;
+				case ELF_Def::Constants::R_386_TLS_LE:        bs << "R_386_TLS_LE";        return true;
+				case ELF_Def::Constants::R_386_TLS_GD:        bs << "R_386_TLS_GD";        return true;
+				case ELF_Def::Constants::R_386_TLS_LDM:       bs << "R_386_TLS_LDM";       return true;
+				case ELF_Def::Constants::R_386_16:            bs << "R_386_16";            return true;
+				case ELF_Def::Constants::R_386_PC16:          bs << "R_386_PC16";          return true;
+				case ELF_Def::Constants::R_386_8:             bs << "R_386_8";             return true;
+				case ELF_Def::Constants::R_386_PC8:           bs << "R_386_PC8";           return true;
+				case ELF_Def::Constants::R_386_TLS_GD_32:     bs << "R_386_TLS_GD_32";     return true;
+				case ELF_Def::Constants::R_386_TLS_GD_PUSH:   bs << "R_386_TLS_GD_PUSH";   return true;
+				case ELF_Def::Constants::R_386_TLS_GD_CALL:   bs << "R_386_TLS_GD_CALL";   return true;
+				case ELF_Def::Constants::R_386_TLS_GD_POP:    bs << "R_386_TLS_GD_POP";    return true;
+				case ELF_Def::Constants::R_386_TLS_LDM_32:    bs << "R_386_TLS_LDM_32";    return true;
+				case ELF_Def::Constants::R_386_TLS_LDM_PUSH:  bs << "R_386_TLS_LDM_PUSH";  return true;
+				case ELF_Def::Constants::R_386_TLS_LDM_CALL:  bs << "R_386_TLS_LDM_CALL";  return true;
+				case ELF_Def::Constants::R_386_TLS_LDM_POP:   bs << "R_386_TLS_LDM_POP";   return true;
+				case ELF_Def::Constants::R_386_TLS_LDO_32:    bs << "R_386_TLS_LDO_32";    return true;
+				case ELF_Def::Constants::R_386_TLS_IE_32:     bs << "R_386_TLS_IE_32";     return true;
+				case ELF_Def::Constants::R_386_TLS_LE_32:     bs << "R_386_TLS_LE_32";     return true;
+				case ELF_Def::Constants::R_386_TLS_DTPMOD32:  bs << "R_386_TLS_DTPMOD32";  return true;
+				case ELF_Def::Constants::R_386_TLS_DTPOFF32:  bs << "R_386_TLS_DTPOFF32";  return true;
+				case ELF_Def::Constants::R_386_TLS_TPOFF32:   bs << "R_386_TLS_TPOFF32";   return true;
+				case ELF_Def::Constants::R_386_SIZE32:        bs << "R_386_SIZE32";        return true;
+				case ELF_Def::Constants::R_386_TLS_GOTDESC:   bs << "R_386_TLS_GOTDESC";   return true;
+				case ELF_Def::Constants::R_386_TLS_DESC_CALL: bs << "R_386_TLS_DESC_CALL"; return true;
+				case ELF_Def::Constants::R_386_TLS_DESC:      bs << "R_386_TLS_DESC";      return true;
+				case ELF_Def::Constants::R_386_IRELATIVE:     bs << "R_386_IRELATIVE";     return true;
+				case ELF_Def::Constants::R_386_GOT32X:        bs << "R_386_GOT32X";        return true;
+				default: return false;
+			}
+
+		case Elf::EM_X86_64:
+			switch (type) {
+				case ELF_Def::Constants::R_X86_64_NONE:            bs << "R_X86_64_NONE";            return true;
+				case ELF_Def::Constants::R_X86_64_64:              bs << "R_X86_64_64";              return true;
+				case ELF_Def::Constants::R_X86_64_PC32:            bs << "R_X86_64_PC32";            return true;
+				case ELF_Def::Constants::R_X86_64_GOT32:           bs << "R_X86_64_GOT32";           return true;
+				case ELF_Def::Constants::R_X86_64_PLT32:           bs << "R_X86_64_PLT32";           return true;
+				case ELF_Def::Constants::R_X86_64_COPY:            bs << "R_X86_64_COPY";            return true;
+				case ELF_Def::Constants::R_X86_64_GLOB_DAT:        bs << "R_X86_64_GLOB_DAT";        return true;
+				case ELF_Def::Constants::R_X86_64_JUMP_SLOT:       bs << "R_X86_64_JUMP_SLOT";       return true;
+				case ELF_Def::Constants::R_X86_64_RELATIVE:        bs << "R_X86_64_RELATIVE";        return true;
+				case ELF_Def::Constants::R_X86_64_GOTPCREL:        bs << "R_X86_64_GOTPCREL";        return true;
+				case ELF_Def::Constants::R_X86_64_32:              bs << "R_X86_64_32";              return true;
+				case ELF_Def::Constants::R_X86_64_32S:             bs << "R_X86_64_32S";             return true;
+				case ELF_Def::Constants::R_X86_64_16:              bs << "R_X86_64_16";              return true;
+				case ELF_Def::Constants::R_X86_64_PC16:            bs << "R_X86_64_PC16";            return true;
+				case ELF_Def::Constants::R_X86_64_8:               bs << "R_X86_64_8";               return true;
+				case ELF_Def::Constants::R_X86_64_PC8:             bs << "R_X86_64_PC8";             return true;
+				case ELF_Def::Constants::R_X86_64_DTPMOD64:        bs << "R_X86_64_DTPMOD64";        return true;
+				case ELF_Def::Constants::R_X86_64_DTPOFF64:        bs << "R_X86_64_DTPOFF64";        return true;
+				case ELF_Def::Constants::R_X86_64_TPOFF64:         bs << "R_X86_64_TPOFF64";         return true;
+				case ELF_Def::Constants::R_X86_64_TLSGD:           bs << "R_X86_64_TLSGD";           return true;
+				case ELF_Def::Constants::R_X86_64_TLSLD:           bs << "R_X86_64_TLSLD";           return true;
+				case ELF_Def::Constants::R_X86_64_DTPOFF32:        bs << "R_X86_64_DTPOFF32";        return true;
+				case ELF_Def::Constants::R_X86_64_GOTTPOFF:        bs << "R_X86_64_GOTTPOFF";        return true;
+				case ELF_Def::Constants::R_X86_64_TPOFF32:         bs << "R_X86_64_TPOFF32";         return true;
+				case ELF_Def::Constants::R_X86_64_PC64:            bs << "R_X86_64_PC64";            return true;
+				case ELF_Def::Constants::R_X86_64_GOTOFF64:        bs << "R_X86_64_GOTOFF64";        return true;
+				case ELF_Def::Constants::R_X86_64_GOTPC32:         bs << "R_X86_64_GOTPC32";         return true;
+				case ELF_Def::Constants::R_X86_64_GOT64:           bs << "R_X86_64_GOT64";           return true;
+				case ELF_Def::Constants::R_X86_64_GOTPCREL64:      bs << "R_X86_64_GOTPCREL64";      return true;
+				case ELF_Def::Constants::R_X86_64_GOTPC64:         bs << "R_X86_64_GOTPC64";         return true;
+				case ELF_Def::Constants::R_X86_64_GOTPLT64:        bs << "R_X86_64_GOTPLT64";        return true;
+				case ELF_Def::Constants::R_X86_64_PLTOFF64:        bs << "R_X86_64_PLTOFF64";        return true;
+				case ELF_Def::Constants::R_X86_64_SIZE32:          bs << "R_X86_64_SIZE32";          return true;
+				case ELF_Def::Constants::R_X86_64_SIZE64:          bs << "R_X86_64_SIZE64";          return true;
+				case ELF_Def::Constants::R_X86_64_GOTPC32_TLSDESC: bs << "R_X86_64_GOTPC32_TLSDESC"; return true;
+				case ELF_Def::Constants::R_X86_64_TLSDESC_CALL:    bs << "R_X86_64_TLSDESC_CALL";    return true;
+				case ELF_Def::Constants::R_X86_64_TLSDESC:         bs << "R_X86_64_TLSDESC";         return true;
+				case ELF_Def::Constants::R_X86_64_IRELATIVE:       bs << "R_X86_64_IRELATIVE";       return true;
+				case ELF_Def::Constants::R_X86_64_RELATIVE64:      bs << "R_X86_64_RELATIVE64";      return true;
+				case ELF_Def::Constants::R_X86_64_GOTPCRELX:       bs << "R_X86_64_GOTPCRELX";       return true;
+				case ELF_Def::Constants::R_X86_64_REX_GOTPCRELX:   bs << "R_X86_64_REX_GOTPCRELX";   return true;
+				case ELF_Def::Constants::R_X86_64_GNU_VTINHERIT:   bs << "R_X86_64_GNU_VTINHERIT";   return true;
+				case ELF_Def::Constants::R_X86_64_GNU_VTENTRY:     bs << "R_X86_64_GNU_VTENTRY";     return true;
+				default: return false;
+			}
+
+		default:
+			return false;
+	}
+}
+
 static void dump_type(BufferStream & bs, Bean::Symbol::Type type) {
 	switch (type) {
 		case Bean::Symbol::TYPE_NONE:           bs << "none";      break;
@@ -152,13 +255,22 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 			bs << endl;
 			if (level >= TRACE)
 				for (const auto & rel : rels) {
-					bs << prefix << "     *0x" << hex << rel.offset << " = ";
+					bs << prefix << "     ";
+					if (rel.reconstructed)
+						bs << "\e[3m";
+					bs << "*0x" << hex << rel.offset;
+					if (rel.reconstructed)
+						bs << "\e[23m";
+					bs << " = \e[2m";
+					if (!dump_relocation(bs, rel.type, rel.machine))
+						bs << '[' << static_cast<unsigned short>(rel.machine) << ':' << rel.type << ']' << endl;
+					bs << "\e[22m ";
 					if (!rel.undefined)
 						bs << "\e[3m";
 					if (rel.name != 0) {
 						bs << rel.name;
 						if (rel.addend != 0)
-							bs << " + " << dec << rel.addend;
+							bs.format(" %+ ld", rel.addend);
 					} else if (rel.target == 0) {
 						bs << "0x" << hex << rel.addend;
 					} else {

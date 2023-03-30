@@ -76,23 +76,29 @@ struct Bean {
 		const char * name;
 
 		/*! \brief Addend for reloaction */
-		uintptr_t addend;
+		intptr_t addend;
 
 		/*! \brief Resolved target address */
 		uintptr_t target;
 
+		/*! \brief the meaning of the relocation type depends on the architecture (although it should be all the same) */
+		ELF_Def::Constants::ehdr_machine machine;
+
 		/*! \brief is the target symbol undefined (= extern) */
 		bool undefined;
 
+		/*! \brief was the relocation reconstrected by Bean */
+		bool reconstructed;
+
 		/*! \brief Constructor using plain values */
-		SymbolRelocation(uintptr_t offset, uintptr_t type, const char * name = nullptr, uintptr_t addend = 0, bool undefined = false, uintptr_t target = 0)
-		  : offset(offset), type(type), name(name), addend(addend), target(target), undefined(undefined) {}
+		SymbolRelocation(uintptr_t offset, uintptr_t type, ELF_Def::Constants::ehdr_machine machine, const char * name = nullptr, intptr_t addend = 0, bool undefined = false, uintptr_t target = 0, bool reconstructed = false)
+		  : offset(offset), type(type), name(name), addend(addend), target(target), machine(machine), undefined(undefined), reconstructed(reconstructed) {}
 
 		/*! \brief Constructor using relocation pointer */
-		SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Relocation & relocation, bool resolve_target = false, uintptr_t global_offset_table = 0);
+		SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Relocation & relocation, ELF_Def::Constants::ehdr_machine machine, bool resolve_target = false, uintptr_t global_offset_table = 0);
 
 		/*! \brief Constructor using relocation pointer */
-		SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Relocation & relocation, bool resolve_target = false, uintptr_t global_offset_table = 0);
+		SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS64>::Relocation & relocation, ELF_Def::Constants::ehdr_machine machine, bool resolve_target = false, uintptr_t global_offset_table = 0);
 	};
 
 	struct Symbol;
@@ -299,8 +305,18 @@ struct Bean {
 
 	const symtree_t symbols;
 
-	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, const ELF<ELF_Def::Identification::ELFCLASS32> * dbgsym = nullptr, bool resolve_internal_relocations = true, bool debug = false, size_t buffer_size = 1048576);
-	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, const ELF<ELF_Def::Identification::ELFCLASS64> * dbgsym = nullptr, bool resolve_internal_relocations = true, bool debug = false, size_t buffer_size = 1048576);
+	enum Flags : uint32_t {
+		FLAG_NONE                         = 0,
+		FLAG_DEBUG                        = 1 << 0,
+		FLAG_RESOLVE_INTERNAL_RELOCATIONS = 1 << 1,
+		FLAG_RECONSTRUCT_RELOCATIONS      = 1 << 2,
+		FLAG_KEEP_UNUSED_SYMBOLS          = 1 << 3,
+	};
+
+	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, const ELF<ELF_Def::Identification::ELFCLASS32> * dbgsym = nullptr, uint32_t flags = 0);
+	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, const ELF<ELF_Def::Identification::ELFCLASS64> * dbgsym = nullptr, uint32_t flags = 0);
+
+	static bool diet();
 
 	void dump(BufferStream & bs, Verbosity level = NONE) const;
 
