@@ -105,7 +105,7 @@ class DebugSymbol:
 
 		# Try debuginfod
 		if debuginfod and buildid and self.debuginfodcache:
-			for service in [ 'https://debuginfod.debian.net', 'https://debuginfod.ubuntu.com' ]:
+			for service in [ 'https://debuginfod.debian.net', 'https://debuginfod.ubuntu.com', 'https://debuginfod.elfutils.org/' ]:
 				try:
 					with urllib.request.urlopen(f'{service}/buildid/{buildid}/debuginfo') as fp:
 						target = (Path('.') / self.debuginfodcache / '.build-id' / buildid[:2] / buildid[2:]).with_suffix('.debug')
