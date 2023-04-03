@@ -13,7 +13,7 @@ int main(int argc, const char *argv[]) {
 		     << "  -R    reconstruct relocations" << endl
 		     << "  -s    use (external) debug symbols" << endl
 		     << "  -k    keep unused symbols" << endl
-	         << "  -b    base directory to search for debug files" << endl
+		     << "  -b    base directory to search for debug files" << endl
 		     << "  -v    list address and names" << endl
 		     << "  -vv   ... and dissassemble code" << endl
 		     << "  -vvv  ... and show all references and relocations" << endl;
@@ -52,6 +52,9 @@ int main(int argc, const char *argv[]) {
 			cerr << "Unsupported parameter '" << argv[i] << endl;
 			return EXIT_FAILURE;
 		} else {
+			if (verbose >= Bean::DEBUG)
+				flags |= Bean::FLAG_DEBUG;
+
 			BeanFile file(argv[i], dbgsym, flags, base);
 			cout << "# " << file.binary.path << " (" << file.binary.size << " bytes):" << endl;
 			file.bean.dump(cout, verbose);
