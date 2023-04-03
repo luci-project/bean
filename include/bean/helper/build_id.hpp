@@ -10,7 +10,9 @@ struct BuildID {
 
 	BuildID(const BuildID & other) : BuildID(other.value) {}
 
-	BuildID(const Elf & file);
+	BuildID(const Elf * file);
+
+	BuildID(const Elf & file) : BuildID(&file) {}
 
 	bool available() const {
 		return value[0] != '\0';
