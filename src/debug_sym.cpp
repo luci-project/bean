@@ -129,7 +129,6 @@ const char * DebugSymbol::find(const char * debug_link, const BuildID & build_id
 	return nullptr;
 }
 
-
 const char * DebugSymbol::find(const Elf & binary) {
 	if (!binary.header.valid() || binary.header.type() == Elf::ET_CORE)
 		return nullptr;
@@ -149,4 +148,11 @@ const char * DebugSymbol::find(const Elf & binary) {
 	BuildID build_id(binary);
 
 	return find(debug_link, build_id);
+}
+
+const char * DebugSymbol::link(const Elf & binary) {
+	for (auto & section: binary.sections)
+		if (String::compare(section.name(), ".gnu_debuglink") == 0)
+			return reinterpret_cast<const char *>(section.data());
+	return nullptr;
 }

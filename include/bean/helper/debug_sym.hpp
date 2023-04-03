@@ -14,18 +14,46 @@ class DebugSymbol {
 	char root[PATH_MAX + 1];
 	StringStream<PATH_MAX + 1> debug_filepath;
 
+	/*! \brief Construct new debug symbol finder
+	 *  \param elf_filepath path to binary (required for debug symbols in same directory)
+	 *  \param root use alternative root (or `nullptr` for real root)
+	 */
 	DebugSymbol(const char * elf_filepath, const char * root = nullptr);
 
+	/*! \brief Find external debug file
+	 *  \param debug_link path to debug symbol file (or `nullptr` if not available)
+	 *  \param build_id BuildID of Elf
+	 *  \return path to debug file
+	 */
 	const char * find(const char * debug_link, const BuildID & build_id);
 
+	/*! \brief Find external debug file
+	 *  \param build_id BuildID of Elf
+	 *  \return path to debug file
+	 */
 	inline const char * find(const BuildID & build_id) {
 		return find(nullptr, build_id);
 	}
 
+	/*! \brief Find external debug file
+	 *  \param debug_link path to debug symbol file (or `nullptr` if not available)
+	 *  \return path to debug file
+	 */
 	inline const char * find(const char * debug_link = nullptr) {
-		BuildID no_build_id(0);
+		BuildID no_build_id{};
 		return find(debug_link, no_build_id);
 	}
 
+	/*! \brief Find external debug file
+	 *  \param binary Elf to be parsed for debug link / symbols and BuildID
+	 *  \return path to debug file
+	 */
 	const char * find(const Elf & binary);
+
+
+	/*! \brief get path linked external debug file
+	 *  \param binary Elf to be parsed for debug link
+	 *  \return debug link path to debug symbols if available
+	 */
+	const char * link(const Elf & binary);
 };
