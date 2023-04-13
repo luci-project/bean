@@ -811,7 +811,6 @@ class AnalyzeX86 : public Analyze<C> {
 
 				size_t size = sym.size;
 
-				cerr << "Checkin Symbol " << sym.name << " @ " << (void*)address << " : " << size << endl;
 				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
 					auto & detail_x86 = insn->detail->x86;
 
@@ -830,7 +829,7 @@ class AnalyzeX86 : public Analyze<C> {
 								if (op.mem.segment == X86_REG_FS) {
 									auto tls_end = this->tls_segment.has_value() ? Math::align_up(this->tls_segment.value().virt_addr() + this->tls_segment.value().virt_size(), this->tls_segment.value().alignment()) : 0;
 									const auto target = Bean::TLS::trans_addr(tls_end + op.mem.disp, true);
-									cerr << (void*)(insn->address) << " + " << (int)detail_x86.encoding.disp_offset << " / " << insn->size << " rel TLS " << (int)detail_x86.encoding.disp_size << ": " << (void*) op.mem.disp << endl;
+									// TODO TLS reloc
 
 								}
 								// RIP relative memory access
