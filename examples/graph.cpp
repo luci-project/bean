@@ -34,6 +34,7 @@ int main(int argc, const char *argv[]) {
 		     << "  -E    highlight entry point" << endl
 		     << "  -f    font to use in dot output" << endl
 		     << "  -r    resolve (internal) relocations" << endl
+		     << "  -R    reconstruct relocations" << endl
 		     << "  -s    use (external) debug symbols" << endl
 		     << "  -k    keep unused symbols" << endl
 		     << "  -b    base directory to search for debug files" << endl
@@ -61,12 +62,14 @@ int main(int argc, const char *argv[]) {
 			entry = true;
 		} else if (String::compare(argv[i], "-f") == 0) {
 			font = argv[++i];
-		} else if (String::compare(argv[i], "-r") == 0) {
-			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
 		} else if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
 		} else if (String::compare(argv[i], "-k") == 0) {
 			flags |= Bean::FLAG_KEEP_UNUSED_SYMBOLS;
+		} else if (String::compare(argv[i], "-r") == 0) {
+			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
+		} else if (String::compare(argv[i], "-R") == 0) {
+			flags |= Bean::FLAG_RECONSTRUCT_RELOCATIONS;
 		} else if (String::compare(argv[i], "-b") == 0) {
 			base = argv[++i];
 		} else if (String::compare(argv[i], "-c") == 0) {

@@ -162,8 +162,12 @@ int main(int argc, const char *argv[]) {
 			dependencies = true;
 		} else if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
+		} else if (String::compare(argv[i], "-k") == 0) {
+			flags |= Bean::FLAG_KEEP_UNUSED_SYMBOLS;
 		} else if (String::compare(argv[i], "-r") == 0) {
 			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
+		} else if (String::compare(argv[i], "-R") == 0) {
+			flags |= Bean::FLAG_RECONSTRUCT_RELOCATIONS;
 		} else if (String::compare(argv[i], "-i", 2) == 0) {
 			for (size_t j = 1; argv[i][j] != '\0'; j++) {
 				if (argv[i][j] == 'i') {
@@ -199,8 +203,10 @@ int main(int argc, const char *argv[]) {
 		     << "   Usage: " << argv[0] << " [-d] [-s] [-r] A B" << endl << endl
 		     << "Parameters:" << endl
 		     << "  -r    resolve (internal) relocations" << endl
+		     << "  -R    reconstruct relocations" << endl
 		     << "  -d    include dependencies" << endl
 		     << "  -s    use (external) debug symbols" << endl
+		     << "  -k    keep unused symbols" << endl
 		     << "  -i    do not check writeable section with external ID (only internal one) " << endl
 		     << "  -ii   do only check executable sections with both IDs, use internal ID for everything else" << endl
 		     << "  -iii  rely on internal ID only for comparison (and ignore external one)" << endl

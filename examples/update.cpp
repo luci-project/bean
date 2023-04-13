@@ -26,6 +26,8 @@ int main(int argc, const char *argv[]) {
 			flags |= Bean::FLAG_KEEP_UNUSED_SYMBOLS;
 		} else if (String::compare(argv[i], "-r") == 0) {
 			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
+		} else if (String::compare(argv[i], "-R") == 0) {
+			flags |= Bean::FLAG_RECONSTRUCT_RELOCATIONS;
 		} else if (String::compare(argv[i], "-b") == 0) {
 			if (old_base == nullptr) {
 				old_base = argv[++i];
@@ -70,9 +72,10 @@ int main(int argc, const char *argv[]) {
 
 	if (new_path == nullptr && new_base == nullptr) {
 		cerr << "Check if NEW ELF binary can update OLD" << endl << endl
-		     << "   Usage: " << argv[0] << " [-r] [-d] [-s] [-k] [-m[THRESHOLD]] [-b [OLD]BASE [-b NEWBASE]] [-v[v[v]]] OLD NEW" << endl
+		     << "   Usage: " << argv[0] << " [-r] [-R] [-d] [-s] [-k] [-m[THRESHOLD]] [-b [OLD]BASE [-b NEWBASE]] [-v[v[v]]] OLD NEW" << endl
 		     << "Parameters:" << endl
 		     << "  -r    resolve (internal) relocations" << endl
+		     << "  -R    reconstruct relocations" << endl
 		     << "  -d    include dependencies" << endl
 		     << "  -s    use (external) debug symbols" << endl
 		     << "  -k    keep unused symbols" << endl
