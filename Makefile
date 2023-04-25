@@ -14,12 +14,14 @@ INSTALLDIR ?= $(HOME)/.local/bin
 AR ?= ar
 CXX ?= g++
 
+DWARFVERSION ?= 5
+
 ifeq ($(OPTIMIZE), 1)
 	CFLAGS := -O3 -DNDEBUG
 	BUILDDIR ?= .build-optimize
 	LIBDIR ?= libs-optimize
 else
-	CFLAGS := -Og -g
+	CFLAGS := -Og -g -gdwarf-$(DWARFVERSION)
 	BUILDDIR ?= .build
 	LIBDIR ?= libs
 endif
