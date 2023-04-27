@@ -1,12 +1,15 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 
+#include <capstone/capstone.h>
 #include <dlh/bytebuffer.hpp>
 #include <dlh/iterator.hpp>
 #include <dlh/string.hpp>
 #include <dlh/xxhash.hpp>
 #include <dlh/math.hpp>
-
-#include <capstone/capstone.h>
 #include <elfo/elf.hpp>
 #include <elfo/elf_rel.hpp>
 
@@ -53,7 +56,6 @@ class AnalyzeX86 : public Analyze<C> {
 			if (addend_sec)
 				this->insert_symbol(addend, 0, nullptr, addend_sec->name(), addend_sec->writeable(), addend_sec->executable());
 		}
-
 	}
 
 	/*! \brief Find additional function start addresses
@@ -128,9 +130,9 @@ class AnalyzeX86 : public Analyze<C> {
 										auto name = relocation->symbol().name();
 
 										auto pos = this->symbols.find(start);
-										if (pos)
+										if (pos) {
 											pos->name = name;
-										else {
+										} else {
 											auto sec = this->sections.floor(start);
 											assert(sec);
 											assert(section.executable());
@@ -141,7 +143,7 @@ class AnalyzeX86 : public Analyze<C> {
 								break;
 #endif
 							case CS_GRP_CALL:
-							{
+							 {
 								auto & detail_x86 = insn->detail->x86;
 								auto & op = detail_x86.operands[detail_x86.op_count - 1];
 								uintptr_t target = 0;
@@ -158,7 +160,7 @@ class AnalyzeX86 : public Analyze<C> {
 									this->insert_symbol(Bean::TLS::trans_addr(target, section->tls()), 0, nullptr, section->name(), section->writeable(), true, Elf::STT_FUNC);
 
 								break;
-							}
+							 }
 							case CS_GRP_RET:
 							case CS_GRP_IRET:
 								ret = true;
@@ -367,7 +369,7 @@ class AnalyzeX86 : public Analyze<C> {
 				this->debug_stream << "\e[0m";
 				if (had_rel) {
 					this->debug_stream << "  #";
-					for (auto r = sym.rels.ceil(a - bytes_per_line); r && r->offset <= a; ++r ) {
+					for (auto r = sym.rels.ceil(a - bytes_per_line); r && r->offset <= a; ++r) {
 						this->debug_stream << " \e[4m";
 						if (r->name != nullptr) {
 							this->debug_stream << r->name;
@@ -515,7 +517,7 @@ class AnalyzeX86 : public Analyze<C> {
 #ifdef BEAN_VERBOSE
 					// Helper for debug
 					int debug_ignore = 255;
-					HashInternalOpDebug op_debug[detail_x86.op_count];
+					HashInternalOpDebug op_debug[detail_x86.op_count];  // NOLINT
 #endif
 					// Handle operands
 					for (int o = 0; o < detail_x86.op_count; o++) {
@@ -527,7 +529,7 @@ class AnalyzeX86 : public Analyze<C> {
 								break;
 
 							case X86_OP_IMM:
-							{
+							 {
 								const auto target = static_cast<uintptr_t>(op.imm);
 								if (is_branch_instruction(insn->id)) {
 #ifdef BEAN_VERBOSE
@@ -549,7 +551,7 @@ class AnalyzeX86 : public Analyze<C> {
 									hashbuf.push(target);
 								}
 								break;
-							}
+							 }
 
 							case X86_OP_MEM:
 								// Handle FS segment (TLS in Linux)
@@ -830,7 +832,6 @@ class AnalyzeX86 : public Analyze<C> {
 									auto tls_end = this->tls_segment.has_value() ? Math::align_up(this->tls_segment.value().virt_addr() + this->tls_segment.value().virt_size(), this->tls_segment.value().alignment()) : 0;
 									const auto target = Bean::TLS::trans_addr(tls_end + op.mem.disp, true);
 									// TODO TLS reloc
-
 								}
 								// RIP relative memory access
 								if (op.mem.base == X86_REG_RIP)
@@ -842,11 +843,9 @@ class AnalyzeX86 : public Analyze<C> {
 						}
 					}
 				}
-
 			}
 			last_addr = sym.address;
 		}
-
 	}
 
 	/*! \brief Constructor */

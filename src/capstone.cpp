@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "capstone.hpp"
 
 #include <dlh/mem.hpp>
@@ -5,7 +9,7 @@
 #include <dlh/stream/buffer.hpp>
 
 static int capstone_vsnprintf(char *str, size_t size, const char *format, va_list ap) {
-	return BufferStream(str, size).format(format, ap);
+	return static_cast<int>(BufferStream(str, size).format(format, ap));
 }
 
 static void * capstone_calloc(size_t nmemb, size_t size) {

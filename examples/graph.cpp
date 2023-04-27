@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include <dlh/stream/output.hpp>
 #include <dlh/string.hpp>
 #include <dlh/math.hpp>
@@ -6,7 +10,7 @@
 
 struct normalize {
 	const char * s;
-	normalize(const char * s) : s(s) {}
+	explicit normalize(const char * s) : s(s) {}
 };
 
 static inline BufferStream& operator<<(BufferStream& bs, const normalize& norm) {

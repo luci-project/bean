@@ -6,6 +6,12 @@ UTILPREFIX = bean-
 LIBNAME = bean
 LIBS := capstone dlh
 
+CPPLINT ?= cpplint
+CPPLINTIGNORE := $(LIBS) elfo
+TIDY ?= clang-tidy
+TIDYCONFIG ?= .clang-tidy
+TIDYIGNORE := capstone
+
 TOOLSDIR := tools
 TOOLS = $(filter-out __pycache__,$(wildcard $(TOOLSDIR)/*))
 
@@ -48,7 +54,8 @@ BUILDFLAGS_dlh += CXXFLAGS="$(CXXFLAGS)"
 BUILDINFO = $(BUILDDIR)/.build_$(LIBNAME).o
 SOURCES = $(shell find $(SRCFOLDER)/ -name "*.cpp")
 OBJECTS = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.o)) $(BUILDINFO)
-EXAMPLES = $(patsubst $(EXAMPLEDIR)/%.cpp,$(UTILPREFIX)%,$(wildcard $(EXAMPLEDIR)/*.cpp))
+EXAMPLESRC = $(wildcard $(EXAMPLEDIR)/*.cpp)
+EXAMPLES = $(patsubst $(EXAMPLEDIR)/%.cpp,$(UTILPREFIX)%,$(EXAMPLESRC))
 DEPFILES = $(patsubst $(SRCFOLDER)/%,$(BUILDDIR)/%,$(SOURCES:.cpp=.d)) $(patsubst $(EXAMPLEDIR)/%.cpp,$(BUILDDIR)/$(UTILPREFIX)%.d,$(wildcard $(EXAMPLEDIR)/*.cpp))
 TARGET = lib$(LIBNAME).a
 
@@ -96,6 +103,17 @@ $(UTILPREFIX)%: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) $(TARGET) $(EXTLIBS) |
 
 examples: $(EXAMPLES)
 	@echo "Examples: $^"
+
+lint::
+	@if $(CPPLINT) --quiet --recursive $(addprefix --exclude=,$(CPPLINTIGNORE)) . ; then \
+		echo "Congratulations, coding style obeyed!" ; \
+	else \
+		echo "Coding style violated -- see CPPLINT.cfg for details" ; \
+		exit 1 ; \
+	fi
+
+tidy: $(TIDYCONFIG)
+	$(VERBOSE) $(TIDY) --config-file=$(TIDYCONFIG) --header-filter="^(?!.*(capstone))" --system-headers $(SOURCES) $(EXAMPLESRC) -- -stdlib=libc++  $(CXXFLAGS)
 
 install: $(EXAMPLES)
 	$(VERBOSE) install -Dm755 $^ $(INSTALLDIR)

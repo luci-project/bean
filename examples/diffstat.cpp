@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include <dlh/stream/output.hpp>
 #include <dlh/assert.hpp>
 #include <dlh/string.hpp>
@@ -5,25 +9,19 @@
 #include <bean/file.hpp>
 #include <bean/helper/build_id.hpp>
 
-struct Diff {
-	BeanFile a_file, b_file;
-	BuildID a_buildid, b_buildid;
-	Bean::syminthash_t a_internal, b_internal;
-	Bean::symhash_t a_extended, b_extended;
+class Diff {
+	BeanFile a_file;
+	BeanFile b_file;
+	BuildID a_buildid;
+	BuildID b_buildid;
+	Bean::syminthash_t a_internal;
+	Bean::syminthash_t b_internal;
+	Bean::symhash_t a_extended;
+	Bean::symhash_t b_extended;
 	bool include_dependencies;
 	uint32_t flags;
 	Bean::ComparisonMode comparison_mode;
 
-	Diff(const char * a_base, const char * a_path, const char * b_base, const char * b_path, bool dbgsym, uint32_t flags, bool dependencies, Bean::ComparisonMode comparison_mode) :
-		a_file(a_path, dbgsym, flags, a_base), b_file(b_path == nullptr ? a_path : b_path, dbgsym, flags, b_base == nullptr ? a_base : b_base),
-		a_buildid(a_file.binary.content), b_buildid(b_file.binary.content),
-		a_internal(a_file.bean.diff_internal(b_file.bean, dependencies)), b_internal(b_file.bean.diff_internal(a_file.bean, dependencies)),
-		a_extended(a_file.bean.diff_extended(b_file.bean, dependencies)), b_extended(b_file.bean.diff_extended(a_file.bean, dependencies)),
-		include_dependencies(dependencies), flags(flags), comparison_mode(comparison_mode) {
-		assert(b_base != nullptr || b_path != nullptr);
-	}
-
- private:
 	template<typename T>
 	static Pair<size_t, size_t> count(T & syms, bool (*filter)(const Bean::Symbol &)) {
 		size_t num = 0;
@@ -77,6 +75,15 @@ struct Diff {
 	}
 
  public:
+	Diff(const char * a_base, const char * a_path, const char * b_base, const char * b_path, bool dbgsym, uint32_t flags, bool dependencies, Bean::ComparisonMode comparison_mode) :
+		a_file(a_path, dbgsym, flags, a_base), b_file(b_path == nullptr ? a_path : b_path, dbgsym, flags, b_base == nullptr ? a_base : b_base),
+		a_buildid(a_file.binary.content), b_buildid(b_file.binary.content),
+		a_internal(a_file.bean.diff_internal(b_file.bean, dependencies)), b_internal(b_file.bean.diff_internal(a_file.bean, dependencies)),
+		a_extended(a_file.bean.diff_extended(b_file.bean, dependencies)), b_extended(b_file.bean.diff_extended(a_file.bean, dependencies)),
+		include_dependencies(dependencies), flags(flags), comparison_mode(comparison_mode) {
+		assert(b_base != nullptr || b_path != nullptr);
+	}
+
 	void print() {
 		cout << '{';
 		print_startline(1);
@@ -158,7 +165,7 @@ int main(int argc, const char *argv[]) {
 	BeanFile * b = nullptr;
 
 	for (int i = 1; i < argc; i++) {
-		if (!String::compare(argv[i], "-d")) {
+		if (String::compare(argv[i], "-d") == 0) {
 			dependencies = true;
 		} else if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;

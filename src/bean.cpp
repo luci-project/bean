@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include <bean/bean.hpp>
 
 #include <dlh/is_in.hpp>
@@ -84,26 +88,26 @@ const Bean::symtree_t Bean::diff(const Bean & other, bool include_dependencies, 
 			return symtree_t(diff_extended(other, include_dependencies));
 
 		case Bean::COMPARE_WRITEABLE_INTERNAL:
-		{
+		 {
 			syminthash_t i(other.symbols);
 			symtree_t r;
-			for (auto & s : diff_extended(other, include_dependencies))
+			for (const auto & s : diff_extended(other, include_dependencies))
 				if (!s.section.writeable || !i.contains(s))
 					r.emplace(s);
 
 			return r;
-		}
+		 }
 
 		case Bean::COMPARE_EXECUTABLE_EXTENDED:
-		{
+		 {
 			syminthash_t i(other.symbols);
 			symtree_t r;
-			for (auto & s : diff_extended(other, include_dependencies))
+			for (const auto & s : diff_extended(other, include_dependencies))
 				if (s.section.executable || !i.contains(s))
 					r.emplace(s);
 
 			return r;
-		}
+		 }
 
 		case Bean::COMPARE_ONLY_INTERNAL:
 			return symtree_t(diff_internal(other, include_dependencies));

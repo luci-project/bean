@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 
 #include <dlh/container/optional.hpp>
@@ -13,8 +17,10 @@ class Analyze {
 
 	/*! \brief Debug buffer size to allocate */
 	static const size_t debug_buffer_size = 1048576;
+#endif
 
  protected:
+#ifdef BEAN_VERBOSE
 	/*! \brief Create detailed debug information for every symbol
 	 * \note Allocated memory will never be freed!
 	 */
@@ -22,9 +28,8 @@ class Analyze {
 
 	/*! \brief Debug string buffer */
 	BufferStream debug_stream;
-
 #endif
- protected:
+
 	/*! \brief Container for all detected symbols */
 	Bean::symtree_t &symbols;
 
@@ -178,7 +183,7 @@ class Analyze {
 	 */
 	virtual void read(const typename ELF<C>::template Array<typename ELF<C>::Segment> & elf_segments) {
 		// Read Program header table
-		for (const auto & segment: elf_segments) {
+		for (const auto & segment : elf_segments) {
 			switch (segment.type()) {
 				case ELF<C>::PT_TLS:
 					assert(!tls_segment.has_value());
@@ -200,7 +205,7 @@ class Analyze {
 					break;
 
 				case ELF<C>::PT_DYNAMIC:
-				{
+				 {
 					section_flags.emplace_back(Bean::Symbol::Section::SECTION_DYNAMIC, segment.virt_addr(), segment.virt_size());
 					size_t rel_start = 0;
 					size_t rel_size = 0;
@@ -214,8 +219,7 @@ class Analyze {
 					size_t init_array_size = 0;
 					size_t fini_array_start = 0;
 					size_t fini_array_size = 0;
-					for (const auto & dyn: segment.get_dynamic())
-
+					for (const auto & dyn : segment.get_dynamic())
 						switch(dyn.tag()) {
 							case ELF<C>::DT_PLTGOT:
 								global_offset_table = dyn.value();
@@ -245,7 +249,7 @@ class Analyze {
 
 							case ELF<C>::DT_STRSZ:
 								strtab_size = dyn.value();
-								break;break;
+								break;
 
 							case ELF<C>::DT_INIT_ARRAY:
 								init_array_start = dyn.value();
@@ -285,7 +289,7 @@ class Analyze {
 					if (fini_array_size != 0 )
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_FINI, fini_array_start, fini_array_size);
 					break;
-				}
+				 }
 
 				case ELF<C>::PT_NOTE:
 					section_flags.emplace_back(Bean::Symbol::Section::SECTION_NOTE, segment.virt_addr(), segment.virt_size());
@@ -308,10 +312,10 @@ class Analyze {
 	 * Gather sections, relocations and (defined) symbols
 	 */
 	virtual void read(const typename ELF<C>::template Array<typename ELF<C>::Section> & elf_sections, bool add_sections = true) {
-		for (const auto & section: elf_sections) {
-			if (section.size() == 0)
+		for (const auto & section : elf_sections) {
+			if (section.size() == 0) {
 				continue;
-			else if (section.allocate() && add_sections) {
+			} else if (section.allocate() && add_sections) {
 				// TODO: What if sections overlap?
 				sections.insert(section);
 				if (strcmp(section.name(), ".init") == 0)
@@ -379,7 +383,7 @@ class Analyze {
 				case ELF<C>::SHT_DYNSYM:
 					if (add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_SYMTAB, section.virt_addr(), section.size());
-					for (const auto & sym: section.get_symbols()) {
+					for (const auto & sym : section.get_symbols()) {
 						switch (sym.section_index()) {
 							case ELF<C>::SHN_UNDEF:
 							case ELF<C>::SHN_ABS:
@@ -388,7 +392,7 @@ class Analyze {
 								break;
 
 							default:
-							{
+							 {
 								auto sym_sec = elf_sections[sym.section_index()];
 								if (sym.type() == ELF<C>::STT_TLS) {
 									assert(sym_sec.tls());
@@ -398,7 +402,7 @@ class Analyze {
 									assert(!Bean::TLS::is_tls(sym.value()));  // check for address space conflicts
 									if (sym.type() != ELF<C>::STT_NOTYPE) {
 										assert(sym.value() >= sym_sec.virt_addr());
-										//assert(sym.value() + sym.size() <= Math::align_up(sym_sec.virt_addr() + sym_sec.size(), sym_sec.alignment()));
+										// assert(sym.value() + sym.size() <= Math::align_up(sym_sec.virt_addr() + sym_sec.size(), sym_sec.alignment()));
 									}
 									if (sym.value() != 0 && elf_sections[sym.section_index()].allocate()) {
 										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.type(), sym.bind());
@@ -407,7 +411,7 @@ class Analyze {
 											insert_symbol(Bean::TLS::trans_addr(sym.value() + sym.size(), sym_sec.tls()));
 									}
 								}
-							}
+							 }
 						}
 					}
 					break;
@@ -425,7 +429,6 @@ class Analyze {
 			for (auto & section_flag : section_flags)
 				if (sym.address >= section_flag.start && sym.address + sym.size < section_flag.start + section_flag.size)
 					sym.section.flags |= section_flag.flag;
-
 		}
 	}
 
@@ -450,7 +453,7 @@ class Analyze {
 	 */
 	virtual void hash_external() {
 		for (auto & sym : symbols) {
-			if (sym.rels.size() > 0 || sym.refs.size() > 0 ) {
+			if (!sym.rels.empty() || !sym.refs.empty()) {
 				XXHash64 id_external(0);  // TODO seed
 				// Relocations
 				for (const auto rel : sym.rels) {
@@ -542,6 +545,5 @@ class Analyze {
 		// 5. reconstruct relocations (if required)
 		if ((this->flags & Bean::FLAG_RECONSTRUCT_RELOCATIONS) != 0)
 			reconstruct_relocations();
-
 	}
 };

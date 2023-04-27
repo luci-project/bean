@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 
 #include <dlh/stream/buffer.hpp>
@@ -17,7 +21,7 @@ struct ElfFile {
 	uintptr_t addr;
 	const Elf content;
 
-	ElfFile(const char * path, bool ignore_size = false)
+	explicit ElfFile(const char * path, bool ignore_size = false)
 	  : path(path),
 	    fd(Syscall::open(path, O_RDONLY).value_or_die("Opening file failed")),
 	    size(get_size()),
@@ -66,15 +70,14 @@ struct BeanFile {
 
 	Bean bean;
 
-	BeanFile(const char * path, bool load_debug_symbols = false, uint32_t flags = Bean::FLAG_NONE, const char * root = nullptr)
+	explicit BeanFile(const char * path, bool load_debug_symbols = false, uint32_t flags = Bean::FLAG_NONE, const char * root = nullptr)
 	  : binary(resolve(path, root)),
 	    dbgsym(load_debug_symbols ? debug_symbols(root) : nullptr),
 	    bean(binary.content, dbgsym != nullptr ? &(dbgsym->content) : nullptr, flags) {}
 
 	~BeanFile() {
 		// Cleanup
-		if (dbgsym != nullptr)
-			delete dbgsym;
+		delete dbgsym;
 	}
 
  private:
@@ -87,7 +90,6 @@ struct BeanFile {
 		}
 		String::copy(this->path, path, PATH_MAX);
 		return this->path;
-
 	}
 
 	ElfFile * debug_symbols(const char * root) {

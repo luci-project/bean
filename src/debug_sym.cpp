@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include <bean/helper/debug_sym.hpp>
 
 #include <dlh/stream/buffer.hpp>
@@ -8,7 +12,7 @@
 #include <dlh/file.hpp>
 
 
-DebugSymbol::DebugSymbol(const char * elf_filepath, const char * root){
+DebugSymbol::DebugSymbol(const char * elf_filepath, const char * root) {
 	// Root
 	if (root == nullptr || root[0] == '\0' || (root[0] == '/' && root[1] == '\0')) {
 		this->root[0] = '\0';
@@ -22,8 +26,7 @@ DebugSymbol::DebugSymbol(const char * elf_filepath, const char * root){
 			this->root[PATH_MAX] = '\0';
 			for (size_t i = String::len(this->root); i > 0 && this->root[i - 1] == '/'; i--)
 				this->root[i - 1] = '\0';
-		}
-		else {
+		} else {
 			this->root[0] = '\0';
 		}
 	}
@@ -69,7 +72,7 @@ const char * DebugSymbol::find(const char * debug_link, const BuildID & build_id
 		else
 			debug_filepath.clear();
 
-		for (auto & debug_dir : debug_dirs) {
+		for (const auto & debug_dir : debug_dirs) {
 			debug_filepath << root << '/' << debug_dir << '/' << elf_dirname << debug_link;
 			if (File::exists(debug_filepath.str()))
 				return debug_filepath.str();
@@ -80,7 +83,7 @@ const char * DebugSymbol::find(const char * debug_link, const BuildID & build_id
 
 	// then Build ID
 	if (build_id.available()) {
-		for (auto & debug_dir : debug_dirs) {
+		for (const auto & debug_dir : debug_dirs) {
 			debug_filepath << root << '/' << debug_dir << "/.build-id/" << build_id.value[0] << build_id.value[1] << '/' << (build_id.value + 2) << ".debug";
 			if (File::exists(debug_filepath.str()))
 				return debug_filepath.str();
@@ -102,7 +105,7 @@ const char * DebugSymbol::find(const char * debug_link, const BuildID & build_id
 	else
 		debug_filepath.clear();
 
-	for (auto & debug_dir : debug_dirs) {
+	for (const auto & debug_dir : debug_dirs) {
 		debug_filepath << root << '/' << debug_dir << '/' << elf_dirname << '/' << elf_filename << ".debug";
 		if (File::exists(debug_filepath.str()))
 			return debug_filepath.str();
@@ -117,7 +120,7 @@ const char * DebugSymbol::find(const char * debug_link, const BuildID & build_id
 	else
 		debug_filepath.clear();
 
-	for (auto & debug_dir : debug_dirs) {
+	for (const auto & debug_dir : debug_dirs) {
 		debug_filepath << root << '/' << debug_dir << '/' << elf_dirname << '/' << elf_filename;
 		if (File::exists(debug_filepath.str()))
 			return debug_filepath.str();
@@ -134,7 +137,7 @@ const char * DebugSymbol::find(const Elf & binary) {
 		return nullptr;
 
 	const char * debug_link = nullptr;
-	for (auto & section: binary.sections)
+	for (const auto & section : binary.sections) {
 		if (String::compare(section.name(), ".gnu_debuglink") == 0) {
 			debug_link = reinterpret_cast<const char *>(section.data());
 		} else if (String::compare(section.name(), ".debug_", 7) == 0) {
@@ -144,6 +147,7 @@ const char * DebugSymbol::find(const Elf & binary) {
 			else
 				debug_filepath.clear();
 		}
+	}
 
 	BuildID build_id(binary);
 
@@ -151,8 +155,9 @@ const char * DebugSymbol::find(const Elf & binary) {
 }
 
 const char * DebugSymbol::link(const Elf & binary) {
-	for (auto & section: binary.sections)
+	for (const auto & section : binary.sections) {
 		if (String::compare(section.name(), ".gnu_debuglink") == 0)
 			return reinterpret_cast<const char *>(section.data());
+	}
 	return nullptr;
 }

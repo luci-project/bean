@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 
 #include <dlh/container/vector.hpp>
@@ -62,7 +66,6 @@ struct Bean {
 
 		MemArea(uintptr_t address, size_t size, bool writeable, bool executable, uint16_t flags = 0)
 		  : address(address), size(size), writeable(writeable), executable(executable), flags(flags) {}
-
 	};
 
 	struct SymbolRelocation {
@@ -180,7 +183,6 @@ struct Bean {
 			bool operator==(const Section & that) const {
 				return this->writeable == that.writeable && this->executable == that.executable && this->flags == that.flags;
 			}
-
 		} section;
 
 		/*! \brief Symbol identifier (hash) */
@@ -224,8 +226,6 @@ struct Bean {
 
 		Symbol(const Symbol &) = default;
 		Symbol(Symbol &&) = default;
-		Symbol & operator=(const Symbol &) = default;
-		Symbol & operator=(Symbol &&) = default;
 
 		void dump_name(BufferStream& bs) const;
 
@@ -234,13 +234,13 @@ struct Bean {
 		void dump(BufferStream & bs, Verbosity level = VERBOSE, const symtree_t * symbols = nullptr, const char * prefix = nullptr) const;
 
 		bool operator==(const Symbol & that) const {
-			return this->id == that.id && this->section == that.section && this->refs.size() == that.refs.size() && this->rels.size() == that.rels.size(); // && this->deps.size() == that.deps.size();
+			return this->id == that.id && this->section == that.section && this->refs.size() == that.refs.size() && this->rels.size() == that.rels.size();  // && this->deps.size() == that.deps.size();
 		}
 	};
 
 	struct SymbolAddressComparison {
 		static inline int compare(uintptr_t lhs, uintptr_t rhs) {
-			return (rhs < lhs) - (lhs < rhs);
+			return static_cast<int>(rhs < lhs) - static_cast<int>(lhs < rhs);
 		}
 
 		static inline int compare(const Symbol & lhs, const Symbol & rhs) { return compare(lhs.address, rhs.address); }
@@ -329,7 +329,7 @@ struct Bean {
 			dump(bs, symtree_t(symbols), level);
 		} else {
 			// unsorted
-			for (const auto & sym: symbols)
+			for (const auto & sym : symbols)
 				sym.dump(bs, level);
 		}
 	}
@@ -345,9 +345,9 @@ struct Bean {
 			else if (!other_symbols.contains(sym)  // find symbols which hash does not exist in other binary
 			    && sym.size > 0  // ignore symbols without size (they are only markers like __end)
 			    && result.insert(sym).second  // skip if already added
-			    && include_dependencies // check if dependencies should be included
+			    && include_dependencies  // check if dependencies should be included
 			)
-				for (const auto address: sym.deps)
+				for (const auto address : sym.deps)
 					dependencies(address, result);
 		return result;
 	}
@@ -376,11 +376,12 @@ struct Bean {
 	template<class SYMDIFFLIST>
 	static bool patchable(const SYMDIFFLIST & diff) {
 		uint16_t ignore = Symbol::Section::SECTION_RELRO | Symbol::Section::SECTION_EH_FRAME | Symbol::Section::SECTION_DYNAMIC;
-		for (const auto & d : diff)
+		for (const auto & d : diff) {
 			if (d.section.writeable && (d.section.flags & ignore) == 0)
 				return false;
 			else if (d.section.has(Symbol::Section::SECTION_INIT))
 				return false;
+		}
 		return true;
 	}
 
@@ -411,7 +412,7 @@ struct Bean {
 		auto sym = symbols.ceil(address);
 		// if symbol was found and not yet part of the result list, add and check all symbols depending on this one
 		if (sym && sym->size > 0 && sym->section.executable && result.emplace(*sym).second)
-			for (const auto d: sym->deps)
+			for (const auto d : sym->deps)
 				dependencies(d, result);
 	}
 };

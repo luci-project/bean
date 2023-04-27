@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 
 #include <elfo/elf.hpp>
@@ -10,7 +14,7 @@ class DebugSymbol {
 
  public:
 	const char * elf_dirname = nullptr;
-	const char * elf_filename = nullptr;;
+	const char * elf_filename = nullptr;
 	char root[PATH_MAX + 1];
 	StringStream<PATH_MAX + 1> debug_filepath;
 
@@ -18,7 +22,7 @@ class DebugSymbol {
 	 *  \param elf_filepath path to binary (required for debug symbols in same directory)
 	 *  \param root use alternative root (or `nullptr` for real root)
 	 */
-	DebugSymbol(const char * elf_filepath, const char * root = nullptr);
+	explicit DebugSymbol(const char * elf_filepath, const char * root = nullptr);
 
 	/*! \brief Find external debug file
 	 *  \param debug_link path to debug symbol file (or `nullptr` if not available)
@@ -55,5 +59,5 @@ class DebugSymbol {
 	 *  \param binary Elf to be parsed for debug link
 	 *  \return debug link path to debug symbols if available
 	 */
-	const char * link(const Elf & binary);
+	static const char * link(const Elf & binary);
 };

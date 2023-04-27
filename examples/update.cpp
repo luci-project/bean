@@ -1,3 +1,7 @@
+// Binary Explorer & Analyzer (Bean)
+// Copyright 2021-2023 by Bernhard Heinloth <heinloth@cs.fau.de>
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include <dlh/parser/string.hpp>
 #include <dlh/stream/output.hpp>
 #include <dlh/string.hpp>
@@ -18,7 +22,7 @@ int main(int argc, const char *argv[]) {
 	BeanFile * b = nullptr;
 
 	for (int i = 1; i < argc; i++) {
-		if (!String::compare(argv[i], "-d")) {
+		if (String::compare(argv[i], "-d") == 0) {
 			dependencies = true;
 		} else if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
@@ -95,7 +99,7 @@ int main(int argc, const char *argv[]) {
 	BeanFile old_file(old_path, dbgsym, flags, old_base);
 	BeanFile new_file(new_path == nullptr ? old_path : new_path, dbgsym, flags, new_base == nullptr ? old_base : new_base);
 
-	auto & diff = new_file.bean.diff(old_file.bean, dependencies, comparison_mode);
+	const auto & diff = new_file.bean.diff(old_file.bean, dependencies, comparison_mode);
 
 	cout << "# Changes at update of "
 	     << old_file.binary.path << " (" << old_file.binary.size << " bytes) with "
