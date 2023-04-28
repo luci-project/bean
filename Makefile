@@ -113,7 +113,7 @@ lint::
 	fi
 
 tidy: $(TIDYCONFIG)
-	$(VERBOSE) $(TIDY) --config-file=$(TIDYCONFIG) --header-filter="^(?!.*(capstone))" --system-headers $(SOURCES) $(EXAMPLESRC) -- -stdlib=libc++  $(CXXFLAGS)
+	$(VERBOSE) $(TIDY) --config-file=$(TIDYCONFIG) --header-filter="^(?!.*(/capstone/))" --system-headers $(SOURCES) $(EXAMPLESRC) -- -stdlib=libc++  $(CXXFLAGS)
 
 install: $(EXAMPLES)
 	$(VERBOSE) install -Dm755 $^ $(INSTALLDIR)
