@@ -43,8 +43,7 @@ int main(int argc, const char *argv[]) {
 		     << "  -k    keep unused symbols" << endl
 		     << "  -b    base directory to search for debug files" << endl
 		     << "  -v    cluster sections" << endl
-		     << "  -vv   ... and show offsets" << endl
-		     << "  -vvv  ... and show all references and relocations" << endl;
+		     << "  -vv   ... and show offsets" << endl;
 		if (Bean::diet())
 			cerr << "[Diet build]" << endl;
 		return EXIT_FAILURE;
