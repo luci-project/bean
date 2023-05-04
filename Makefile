@@ -34,7 +34,7 @@ endif
 
 CFLAGS += -ffunction-sections -fdata-sections
 CFLAGS += -fno-builtin -fno-exceptions -fno-stack-protector -mno-red-zone -fPIE
-CFLAGS += -ffreestanding -nostdlib -fno-jump-tables -fno-plt -ffreestanding
+CFLAGS += -nostdlib -fno-jump-tables -fno-plt
 
 CXXFLAGS := -std=c++17 $(CFLAGS) -Wall -Wextra -Wno-switch -Wno-unused-variable -Wno-comment
 CXXFLAGS += -I include -I bean/include/ -I elfo/include/ $(foreach LIB,$(LIBS),-I $(LIB)/include)
