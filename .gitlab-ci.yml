@@ -1,10 +1,18 @@
 variables:
   GIT_SUBMODULE_STRATEGY: recursive
 
-build:
-  image: inf4/stubs:gcc-x64
+gcc:
+  image: inf4/luci:ubuntu-jammy
   script:
-    - make
+    - make CXX=g++
+  artifacts:
+    paths:
+      - "bean-*"
+
+clang:
+  image: inf4/luci:ubuntu-jammy
+  script:
+    - make CXX=clang++
   artifacts:
     paths:
       - "bean-*"
