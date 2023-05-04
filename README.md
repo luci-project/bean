@@ -7,18 +7,19 @@ A library to detect changes of different versions of binaries in the [Executable
 Dependencies
 ------------
 
- - [ELFO](https://gitlab.cs.fau.de/heinloth/elfo) is used to access the contents of [ELF](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format)-Files
- - [Dirty Little Helper](https://gitlab.cs.fau.de/heinloth/dlh) provides the required standard library functions as well as the data structures (tree/hash set/map)
+ - [Elfo](https://gitlab.cs.fau.de/luci-project/elfo) is used to access the contents of [ELF](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format)-Files
+ - [Dirty Little Helper](https://gitlab.cs.fau.de/luci-project/dlh) provides the required standard library functions as well as the data structures (tree/hash set/map)
  - [Capstone](http://www.capstone-engine.org/) is used to disassemble the binary sections
 
 
 Build
 -----
 
-Just run `make`. This will create two static libraries:
+After ensuring all submodules are checked out (`git submodule update --init --recursive`),
+just run `make`. This will create two static libraries:
 
- - `libbean.a` contains the binary analyzer
- - `libbean-pack.a` also includes the Bean dependencies (Capstone and DLH)
+ - `libs/libbean.a` contains the binary analyzer
+ - `libbean.a` also includes the Bean dependencies (Capstone and DLH)
 
 
 Examples
@@ -28,35 +29,66 @@ The `examples` directory contains a few example programs, which can be built usi
 
     make examples
 
+They are controlled with several similar parameters:
+
+|  Flag  |  Description                                           |
+|--------|--------------------------------------------------------|
+| `-h`   | print usage information including available parameters |
+| `-r`   | resolve (internal) relocations                         |
+| `-R`   | try to reconstruct certain relocations                 |
+| `-d`   | inherit incompatibility from dependencies              |
+| `-s`   | also use (external) debug symbols in analyzer          |
+| `-k`   | do not omit unused/empty symbols                       |
+| `-b`   | set base directory to search for debug files           |
+| `-v`   | verbose output with address and names                  |
+| `-vv`  | ... and include dissassembled code                     |
+| `-vvv` | ... and show all references and relocations            |
+
+(for a detailed list, use `-h`)
+
+
 ### Hash
 
-Generate the hash values for the symbols in the given ELF files using `bean-hash`
-Use the verbose parameter (`-v`, `-vv`, `-vvv`) for additional information about the generation of the hashes:
+Generate the hash values for the symbols in the given ELF files using `bean-hash`:
 
-Disassembled instructions are color-coded to highlight excluded parts for the
-hashing. Moreover, all references and relocations are resolved.
+    ./bean-hash libfoo.so.1.0.0
+
+Use the verbose parameter (`-v`, `-vv`, `-vvv`) for a more detailed overview about the contents used for the hashes.
+Disassembled instructions are color-coded to highlight excluded parts for the hashing.
+Moreover, all references and relocations are taken into account.
 
 
 ### Diff
 
 Changed symbols of two given ELF files are highlighted in a diff typical manner by `bean-diff`.
-Increase the verbosity level for additional information about the changed symbols.
+Increase the verbosity level for additional information about the changed symbols:
+
+    ./bean-diff -vvv -r -d libfoo.so.1.0.0 libfoo.so.1.0.1
 
 
 ### DiffStat
 
-The util `bean-diffstat` gives a summary of changed symbols between two given ELF files in JSON format.
+The util `bean-diffstat` gives a summary of changed symbols between two given ELF files in JSON format:
+
+    ./bean-diffstat -r -d libfoo.so.1.0.0 libfoo.so.1.0.1
 
 
 ### Graph
 
 To visualize the calls and dependencies of an executable, you can use the output of `bean-graph` piped to [Graphviz](https://graphviz.org/) `dot` utility.
 
+    ./bean-graph -e -r -vv libfoo.so.1.0.0 | dot -Tx11
+
+The parameter `-e` highlights external symbols, while `-vv` will cluster the symbols according to their section and show offsets in the call edges.
 
 
 ### Update
 
 Check if an ELF file can be live-updated by another ELF file with `bean-update`
+
+    ./bean-update -r -d -v libfoo.so.1.0.0 libfoo.so.1.0.1
+
+This outputs all symbols with changes and exits with status `0` if updates can be applied.
 
 
 Tools
@@ -72,17 +104,10 @@ the `tools` directory contains several helper scripts written in Bash and Python
 
 [pip](https://pypi.org/project/pip/) is used to install the requirements:
 
-	pip install -r requirements.txt
+    pip install -r requirements.txt
 
 
 Author & License
 ----------------
 
 *Bean* is part of the *Luci*-project, which is being developed by [Bernhard Heinloth](https://sys.cs.fau.de/person/heinloth) of the [Department of Computer Science 4](https://sys.cs.fau.de/) at [Friedrich-Alexander-Universität Erlangen-Nürnberg](https://www.fau.eu/) and is available under the [GNU Affero General Public License, Version 3 (AGPL v3)](LICENSE.md).
-
-
-Name
-----
-
-Its name origins from the [Disenchantment](https://en.wikipedia.org/wiki/Disenchantment_(TV_series)) [character](https://disenchantment.fandom.com/wiki/Bean), obviously.
-Thanks for all the fun, [Matt](https://en.wikipedia.org/wiki/Matt_Groening)!
