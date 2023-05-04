@@ -54,18 +54,6 @@ extern "C" char * strncpy(char *dest, const char *src, size_t n) {
 	return String::copy(dest, src, n);
 }
 
-extern "C" void* memcpy(void * __restrict__ dest, void const * __restrict__ src, size_t size) {
-	return Memory::copy(dest, src, size);
-}
-
-extern "C" void* memmove(void * dest, void const * src, size_t size) {
-	return Memory::move(dest, src, size);
-}
-
-extern "C" void* memset(void * dest, int c, size_t size) {
-	return Memory::set(dest, c, size);
-}
-
 bool capstone_dump(BufferStream & out, void * ptr, size_t size, uintptr_t start) {
 	capstone_init();
 	csh cshandle;
