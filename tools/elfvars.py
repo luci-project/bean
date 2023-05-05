@@ -77,7 +77,7 @@ class ElfVar:
 			self.path = Path(file.name).resolve()
 			self.file = file
 		else:
-			path = Path(path)
+			path = Path(file)
 			if path.exists():
 				self.path = path.absolute()
 			elif (self.root / path).exists():
