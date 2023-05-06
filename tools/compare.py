@@ -168,7 +168,7 @@ def build_cell(result, obj, base, hashval, hashdbg, highlight = False):
 					text.append(Text("\n {removed}".format_map(data), Style(color='light_coral', dim=dim)))
 
 		elif 'total' in data:
-			add_details(text, data, section, obj <= base)
+			add_details(text, data, section, dim)
 
 	if len(text) == 0:
 		text.append(Text("error", Style(color="red")))
