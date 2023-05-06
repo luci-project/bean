@@ -21,7 +21,6 @@ just run `make`. This will create two static libraries:
  - `libs/libbean.a` contains the binary analyzer
  - `libbean.a` also includes the Bean dependencies (Capstone and DLH)
 
-
 Examples
 --------
 
@@ -105,6 +104,12 @@ the `tools` directory contains several helper scripts written in Bash and Python
 [pip](https://pypi.org/project/pip/) is used to install the requirements:
 
     pip install -r requirements.txt
+
+To install the examples and tools (prefixed with `bean-`) in `$HOME/.local/bin` run
+
+    make install
+
+> **Please note:** Partial units, used in compressed DWARF (see Appendix E of the [DWARF4 Standard](https://dwarfstd.org/doc/DWARF4.pdf)), are not supported yet.
 
 
 Author & License
