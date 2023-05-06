@@ -108,9 +108,9 @@ class Diff {
 		print_startline(1);
 		cout << "\"build-id\": {";
 		print_startline(2);
-		cout << "\"added\": \"" << a_buildid.value << "\",";
+		cout << "\"added\": \"" << b_buildid.value << "\",";
 		print_startline(2);
-		cout << "\"removed\": \"" << b_buildid.value << '"';
+		cout << "\"removed\": \"" << a_buildid.value << '"';
 		print_startline(1);
 		cout << "},";
 		print_filter("init", 1, [](const Bean::Symbol & sym) {
