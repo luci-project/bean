@@ -327,14 +327,14 @@ class Analyze {
 				// TODO: Read relocations, since they need to be compared as well (especially undefined ones...)
 				case ELF<C>::SHT_REL:
 				case ELF<C>::SHT_RELA:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELOC, section.virt_addr(), section.size());
 					for (const auto & entry : section.get_relocations())
 						relocations.emplace(entry);
 					break;
 
 				case ELF<C>::SHT_RELR:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELOC, section.virt_addr(), section.size());
 					for (const auto & entry : section.get_relative_relocations())
 						relative_relocations.insert(entry.offset());
@@ -342,46 +342,46 @@ class Analyze {
 
 				case ELF<C>::SHT_HASH:
 				case ELF<C>::SHT_GNU_HASH:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_HASH, section.virt_addr(), section.size());
 					break;
 
 				case ELF<C>::SHT_GNU_VERDEF:
 				case ELF<C>::SHT_GNU_VERNEED:
 				case ELF<C>::SHT_GNU_VERSYM:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_VERSION, section.virt_addr(), section.size());
 					break;
 
 				case ELF<C>::SHT_INIT_ARRAY:
 				case ELF<C>::SHT_PREINIT_ARRAY:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_INIT, section.virt_addr(), section.size());
 					break;
 
 				case ELF<C>::SHT_FINI_ARRAY:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_FINI, section.virt_addr(), section.size());
 					break;
 
 				case ELF<C>::SHT_STRTAB:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_STRTAB, section.virt_addr(), section.size());
 					break;
 
 				case ELF<C>::SHT_DYNAMIC:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_DYNAMIC, section.virt_addr(), section.size());
 					break;
 
 				case ELF<C>::SHT_NOBITS:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_NOBITS, section.virt_addr(), section.size());
 					break;
 
 				case ELF<C>::SHT_SYMTAB:
 				case ELF<C>::SHT_DYNSYM:
-					if (add_sections)
+					if (section.allocate() && add_sections)
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_SYMTAB, section.virt_addr(), section.size());
 					for (const auto & sym : section.get_symbols()) {
 						switch (sym.section_index()) {
