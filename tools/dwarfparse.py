@@ -372,8 +372,8 @@ def _resolve_abstract_origin(DIEs, offset):
 		if isinstance(other, int) and other in DIEs:
 			_resolve_abstract_origin(DIEs, other)
 			DIEs[offset] = DIEs[other] | DIEs[offset] | { 'resolved_origin' : True }
-		else:
-			print(f"Unable to resolve {str(other)}", file=sys.stderr)
+		#else:
+		#	print(f"Unable to resolve {str(other)}", file=sys.stderr)
 
 def parse_dwarf(file):
 	elffile = ELFFile(file)
