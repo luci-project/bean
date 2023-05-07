@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]] ; do
 done
 
 if [[ $NODEBUG -eq 1 ]] ; then
-	echp "Not using debug symbols!"
+	echo "Not using debug symbols!"
 	for index in "${!ELFVARSARGS[@]}" ; do
 		if [[ "${ELFVARSARGS[$i],,}" == "-d" ]] ; then
 			unset -v 'ELFVARSARGS[$i]'
