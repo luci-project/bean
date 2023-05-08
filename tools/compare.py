@@ -3,6 +3,7 @@
 
 from pathlib import Path
 from natsort import natsorted, ns
+from rich.terminal_theme import TerminalTheme
 from rich.progress import Progress
 from rich.console import Console
 from rich.markup import escape
@@ -291,13 +292,37 @@ for o in sorted_objs:
 		output.print(summary, end='\n')
 
 if args.output:
+	THEME_SOLARIZED_DARK = TerminalTheme(
+		(0, 43, 54),
+		(131, 148, 150),
+		[
+			(7, 54, 66),
+			(220, 50, 47),
+			(133, 153, 0),
+			(181, 137, 0),
+			(38, 139, 210),
+			(211, 54, 130),
+			(42, 161, 152),
+			(238, 232, 213),
+		],
+		[
+			(0, 43, 54),
+			(203, 75, 22),
+			(88, 110, 117),
+			(101, 123, 131),
+			(131, 148, 150),
+			(108, 113, 196),
+			(147, 161, 161),
+			(253, 246, 227),
+		],
+	)
 	for handle in args.output:
 		with handle as f:
 			print(f"(Exporting to {f.name}...", file=sys.stderr)
 			if f.name.lower().endswith(('htm','html')):
-				f.write(output.export_html(clear=False))
+				f.write(output.export_html(theme=THEME_SOLARIZED_DARK,clear=False))
 			elif f.name.lower().endswith(('svg')):
-				f.write(output.export_svg(title=str(base),clear=False))
+				f.write(output.export_svg(title=str(base),theme=THEME_SOLARIZED_DARK,clear=False))
 			else:
 				f.write(output.export_text(clear=False))
 	devnull.close()
