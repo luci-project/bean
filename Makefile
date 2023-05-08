@@ -15,7 +15,11 @@ TIDYIGNORE := capstone
 TOOLSDIR := tools
 TOOLS = $(filter-out __pycache__,$(wildcard $(TOOLSDIR)/*))
 
-INSTALLDIR ?= $(HOME)/.local/bin
+ifeq ($(HOME),/root)
+	INSTALLDIR ?= /usr/local/bin
+else
+	INSTALLDIR ?= $(HOME)/.local/bin
+endif
 
 AR ?= ar
 CXX ?= g++
@@ -118,7 +122,7 @@ tidy: $(TIDYCONFIG)
 install: $(EXAMPLES)
 	$(VERBOSE) install -Dm755 $^ $(INSTALLDIR)
 	$(VERBOSE) $(foreach TOOL,$(TOOLS),ln -f -s $(realpath $(TOOL)) $(INSTALLDIR)/$(UTILPREFIX)$(basename $(notdir $(TOOL))) ; )
-	$(VERBOSE) if ! echo "$(PATH)" | grep "$(INSTALLDIR)" >/dev/null 2>&1 ; then \
+	$(VERBOSE) if ! echo "$(PATH)" | egrep '(^|:)$(INSTALLDIR)(:|$$)' >/dev/null 2>&1 ; then \
 		echo "You have to add '$(INSTALLDIR)' to PATH!" ; \
 	fi
 
