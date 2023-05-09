@@ -1,13 +1,13 @@
 Bean - Binary Explorer & Analyzer
 =================================
 
-A library to detect changes of different versions of binaries in the [Executable and Linking Format](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format).
+A library to detect changes in different versions of binaries in the [Executable and Linking Format](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format).
 
 
 Dependencies
 ------------
 
- - [Elfo](https://gitlab.cs.fau.de/luci-project/elfo) is used to access the contents of [ELF](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format)-Files
+ - [Elfo](https://gitlab.cs.fau.de/luci-project/elfo) is used to access the contents of [ELF](https://en.wikipedia.org/wiki/Executable_and_Linkable_Format)-files
  - [Dirty Little Helper](https://gitlab.cs.fau.de/luci-project/dlh) provides the required standard library functions as well as the data structures (tree/hash set/map)
  - [Capstone](http://www.capstone-engine.org/) is used to disassemble the binary sections
 
@@ -52,7 +52,7 @@ Generate the hash values for the symbols in the given ELF files using `bean-hash
 
     ./bean-hash libfoo.so.1.0.0
 
-Use the verbose parameter (`-v`, `-vv`, `-vvv`) for a more detailed overview about the contents used for the hashes.
+Use the verbose parameter (`-v`, `-vv`, `-vvv`) for a more detailed overview of the contents used for the hashes.
 Disassembled instructions are color-coded to highlight excluded parts for the hashing.
 Moreover, all references and relocations are taken into account.
 
@@ -96,10 +96,10 @@ Tools
 the `tools` directory contains several helper scripts written in Bash and Python 3:
 
  - `dbgsym.py` tries to gather debug binaries for a given binary (according to [GDB](https://sourceware.org/gdb/onlinedocs/gdb/Separate-Debug-Files.html) including the [debuginfod](https://sourceware.org/elfutils/Debuginfod.html) service)
- - `dwarvars.py` extracts variables, datatypes, function declarations etc from debug information, employing `dwarfparse.py` (which itself uses the [pyelftools](https://github.com/eliben/pyelftools) to read the [DWARF](https://dwarfstd.org/) format.
+ - `dwarvars.py` extracts variables, datatypes, function declarations, etc. from debug information, employing `dwarfparse.py` (which itself uses the [pyelftools](https://github.com/eliben/pyelftools) to read the [DWARF](https://dwarfstd.org/) format.
  - `elfvars.py` calculates symbol hashes
  - `elfvarsd.sh` is a wrapper script to run the symbol hashing as a daemon listening on a socket/port
- - `compare.py` gives an overview about changes in multiple different versions of a binary
+ - `compare.py` gives an overview of changes in multiple different versions of a binary
 
 [pip](https://pypi.org/project/pip/) is used to install the requirements:
 
