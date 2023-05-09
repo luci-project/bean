@@ -369,7 +369,7 @@ def _read_die(die):
 def _resolve_abstract_origin(DIEs, offset):
 	if 'abstract_origin' in DIEs[offset] and not 'resolved_origin' in DIEs[offset]:
 		other = DIEs[offset]['abstract_origin'][0]
-		if isinstance(other, int) and other in DIEs:
+		if isinstance(other, int) and other in DIEs and other != offset:
 			_resolve_abstract_origin(DIEs, other)
 			DIEs[offset] = DIEs[other] | DIEs[offset] | { 'resolved_origin' : True }
 		#else:
