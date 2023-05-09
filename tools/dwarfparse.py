@@ -371,7 +371,10 @@ def _resolve_abstract_origin(DIEs, offset):
 		other = DIEs[offset]['abstract_origin'][0]
 		if isinstance(other, int) and other in DIEs and other != offset:
 			_resolve_abstract_origin(DIEs, other)
-			DIEs[offset] = DIEs[other] | DIEs[offset] | { 'resolved_origin' : True }
+			tmp = DIEs[other].copy()
+			tmp.update(DIEs[offset])
+			tmp['resolved_origin'] = True
+			DIEs[offset] = tmp
 		#else:
 		#	print(f"Unable to resolve {str(other)}", file=sys.stderr)
 
