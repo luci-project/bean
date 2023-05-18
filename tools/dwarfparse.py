@@ -398,7 +398,9 @@ def parse_dwarf(file):
 			DIEs[offset]['decl'] = DIEs[offset]['decl_file']
 			del DIEs[offset]['decl_file']
 		if 'decl_line' in DIEs[offset]:
-			DIEs[offset]['decl'] = (DIEs[offset]['decl'] or '[unknwon]') + ':' + str(DIEs[offset]['decl_line'])
+			if not 'decl' in DIEs[offset] or not DIEs[offset]['decl']:
+				DIEs[offset]['decl'] = '[unknwon]'
+			DIEs[offset]['decl'] += ':' + str(DIEs[offset]['decl_line'])
 			del DIEs[offset]['decl_line']
 		if 'decl_column' in  DIEs[offset]:
 			if 'decl' in DIEs[offset]:
