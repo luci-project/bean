@@ -694,14 +694,29 @@ class AnalyzeX86 : public Analyze<C> {
 	}
 
  private:
-	bool create_relocation(Bean::Symbol & sym, uintptr_t offset, uintptr_t target, uint8_t size, intptr_t addend) {
-		// Skip internal relocations (referencing inside a function, e.g. loops)
-		if (target >= sym.address && target < sym.address + sym.size)
-			return false;
+	bool create_relocation(Bean::Symbol & sym, uintptr_t address, uint8_t offset, uintptr_t target, uint8_t size, intptr_t addend, bool branch, uint8_t op_access) {
+		// Access bits
+		uint8_t access = 0;
+		if ((op_access & CS_AC_READ) != 0)
+			access |= Bean::SymbolRelocation::ACCESSFLAG_READ;
+		if ((op_access & CS_AC_WRITE) != 0)
+			access |= Bean::SymbolRelocation::ACCESSFLAG_WRITE;
+		if (branch)
+			access |= Bean::SymbolRelocation::ACCESSFLAG_BRANCH;
 
-		// Skip existing relocations
-		if (sym.rels.contains(offset))
+		// internal relocations (referencing inside a function, e.g. loops)
+		if (target >= sym.address && target < sym.address + sym.size)
+			access |= Bean::SymbolRelocation::ACCESSFLAG_LOCAL;
+
+		// Adress of relocation
+		uintptr_t rel_address = address + offset;
+
+		// Update & skip existing relocations
+		if (auto target_sym = sym.rels.find(target)) {
+			target_sym->instruction_access |= access;
+			target_sym->instruction_offset = offset;
 			return false;
+		}
 
 		auto type = ELF<C>::R_X86_64_NONE;
 		const char * symbol_name = nullptr;
@@ -770,7 +785,7 @@ class AnalyzeX86 : public Analyze<C> {
 					break;
 			}
 		}
-		return sym.rels.emplace(offset, type, this->elf.header.machine(), symbol_name, addend, false, target, true).second;
+		return sym.rels.emplace(rel_address, type, this->elf.header.machine(), symbol_name, addend, false, target, true, access, offset).second;
 	}
 
  public:
@@ -823,7 +838,7 @@ class AnalyzeX86 : public Analyze<C> {
 						switch (op.type) {
 							case X86_OP_IMM:
 								if (is_branch_instruction(insn->id))
-									create_relocation(sym, insn->address + detail_x86.encoding.imm_offset, static_cast<uintptr_t>(op.imm), detail_x86.encoding.imm_size, -1 * (insn->size - detail_x86.encoding.imm_offset));
+									create_relocation(sym, insn->address, detail_x86.encoding.imm_offset, static_cast<uintptr_t>(op.imm), detail_x86.encoding.imm_size, -1 * (insn->size - detail_x86.encoding.imm_offset), true, op.access);
 								break;
 
 							case X86_OP_MEM:
@@ -835,7 +850,7 @@ class AnalyzeX86 : public Analyze<C> {
 								}
 								// RIP relative memory access
 								if (op.mem.base == X86_REG_RIP)
-									create_relocation(sym, insn->address + detail_x86.encoding.disp_offset, insn->address + insn->size + op.mem.disp, detail_x86.encoding.disp_size, -1 * (insn->size - detail_x86.encoding.disp_offset));
+									create_relocation(sym, insn->address, detail_x86.encoding.disp_offset, insn->address + insn->size + op.mem.disp, detail_x86.encoding.disp_size, -1 * (insn->size - detail_x86.encoding.disp_offset), false, op.access);
 								break;
 
 							default:

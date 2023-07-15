@@ -85,17 +85,32 @@ struct Bean {
 		uintptr_t target;
 
 		/*! \brief the meaning of the relocation type depends on the architecture (although it should be all the same) */
-		ELF_Def::Constants::ehdr_machine machine;
+		ELF_Def::Constants::ehdr_machine machine : 16;
 
 		/*! \brief is the target symbol undefined (= extern) */
-		bool undefined;
+		bool undefined : 1;
 
 		/*! \brief was the relocation reconstrected by Bean */
-		bool reconstructed;
+		bool reconstructed : 1;
+
+		/*! \brief offset of relocation to begin of instruction (only available if FLAG_RECONSTRUCT_RELOCATIONS is used) */
+		uint8_t instruction_offset : 4;
+
+		/*! \brief How does the instruction access the relocation (only available if FLAG_RECONSTRUCT_RELOCATIONS is used) */
+		enum AcccesFlags : uint8_t {
+			ACCESSFLAG_UNKNOWN      = 0,
+			ACCESSFLAG_READ         = 1 << 0,  // Read
+			ACCESSFLAG_WRITE        = 1 << 1,  // Write
+			ACCESSFLAG_BRANCH       = 1 << 2,  // branching instruction
+			ACCESSFLAG_LOCAL        = 1 << 3,  // target in function scope
+		};
+		uint8_t instruction_access : 8;
+
+
 
 		/*! \brief Constructor using plain values */
-		SymbolRelocation(uintptr_t offset, uintptr_t type, ELF_Def::Constants::ehdr_machine machine, const char * name = nullptr, intptr_t addend = 0, bool undefined = false, uintptr_t target = 0, bool reconstructed = false)
-		  : offset(offset), type(type), name(name), addend(addend), target(target), machine(machine), undefined(undefined), reconstructed(reconstructed) {}
+		SymbolRelocation(uintptr_t offset, uintptr_t type, ELF_Def::Constants::ehdr_machine machine, const char * name = nullptr, intptr_t addend = 0, bool undefined = false, uintptr_t target = 0, bool reconstructed = false, uint8_t instruction_access = ACCESSFLAG_UNKNOWN, uint8_t instruction_offset = 0)
+		  : offset(offset), type(type), name(name), addend(addend), target(target), machine(machine), undefined(undefined), reconstructed(reconstructed), instruction_offset(instruction_offset), instruction_access(instruction_access) {}
 
 		/*! \brief Constructor using relocation pointer */
 		SymbolRelocation(const typename ELF<ELF_Def::Identification::ELFCLASS32>::Relocation & relocation, ELF_Def::Constants::ehdr_machine machine, bool resolve_target = false, uintptr_t global_offset_table = 0);

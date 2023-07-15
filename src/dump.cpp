@@ -456,6 +456,18 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 							ref_sym->id.dump(bs);
 						}
 					}
+					if (rel.instruction_access != Bean::SymbolRelocation::ACCESSFLAG_UNKNOWN) {
+						bs << " \e[2m(";
+						if ((rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_READ) != 0)
+							bs << 'r';
+						if ((rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_WRITE) != 0)
+							bs << 'w';
+						if ((rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_BRANCH) != 0)
+							bs << 'b';
+						if ((rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_LOCAL) != 0)
+							bs << 'l';
+						bs << '@-' << static_cast<unsigned>(rel.instruction_offset) << ") \e[22m";
+					}
 					if (!rel.undefined)
 						bs << "\e[23m";
 					bs << endl;
