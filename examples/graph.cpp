@@ -41,6 +41,7 @@ int main(int argc, const char *argv[]) {
 		     << "  -R    reconstruct relocations" << endl
 		     << "  -s    use (external) debug symbols" << endl
 		     << "  -k    keep unused symbols" << endl
+		     << "  -a    use all symbol attributes for internal ID hash" << endl
 		     << "  -b    base directory to search for debug files" << endl
 		     << "  -v    cluster sections" << endl
 		     << "  -vv   ... and show offsets" << endl;
@@ -73,6 +74,8 @@ int main(int argc, const char *argv[]) {
 			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
 		} else if (String::compare(argv[i], "-R") == 0) {
 			flags |= Bean::FLAG_RECONSTRUCT_RELOCATIONS;
+		} else if (String::compare(argv[i], "-a") == 0) {
+			flags |= Bean::FLAG_HASH_ATTRIBUTES_FOR_ID;
 		} else if (String::compare(argv[i], "-b") == 0) {
 			base = argv[++i];
 		} else if (String::compare(argv[i], "-c") == 0) {
@@ -90,6 +93,9 @@ int main(int argc, const char *argv[]) {
 			cerr << "Unsupported parameter '" << argv[i] << endl;
 			return EXIT_FAILURE;
 		} else {
+			if (verbose >= Bean::DEBUG)
+				flags |= Bean::FLAG_DEBUG;
+
 			BeanFile file(argv[i], dbgsym, flags, base);
 
 			cout << "digraph " << normalize(argv[i]) << " {" << endl

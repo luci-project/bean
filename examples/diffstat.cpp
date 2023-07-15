@@ -175,6 +175,8 @@ int main(int argc, const char *argv[]) {
 			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
 		} else if (String::compare(argv[i], "-R") == 0) {
 			flags |= Bean::FLAG_RECONSTRUCT_RELOCATIONS;
+		} else if (String::compare(argv[i], "-a") == 0) {
+			flags |= Bean::FLAG_HASH_ATTRIBUTES_FOR_ID;
 		} else if (String::compare(argv[i], "-i", 2) == 0) {
 			for (size_t j = 1; argv[i][j] != '\0'; j++) {
 				if (argv[i][j] == 'i') {
@@ -214,6 +216,7 @@ int main(int argc, const char *argv[]) {
 		     << "  -d    include dependencies" << endl
 		     << "  -s    use (external) debug symbols" << endl
 		     << "  -k    keep unused symbols" << endl
+		     << "  -a    use all symbol attributes for internal ID hash" << endl
 		     << "  -i    do not check writeable section with external ID (only internal one) " << endl
 		     << "  -ii   do only check executable sections with both IDs, use internal ID for everything else" << endl
 		     << "  -iii  rely on internal ID only for comparison (and ignore external one)" << endl

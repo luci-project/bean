@@ -443,8 +443,15 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 					bs << "\e[22m ";
 					if (!rel.undefined)
 						bs << "\e[3m";
-					if (rel.name != 0) {
-						bs << rel.name;
+					auto relsym = symbols->floor(rel.target);
+					if (relsym) {
+						if (String::len(rel.name) > 0)
+							bs << rel.name << ' ';
+						else if (String::len(relsym->name) > 0)
+							bs << relsym->name << ' ';
+						else
+							bs << "<0x" << hex << relsym->address << "> " ;
+						relsym->id.dump(bs);
 						if (rel.addend != 0)
 							bs.format(" %+ ld", rel.addend);
 					} else if (rel.target == 0) {
@@ -466,7 +473,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 							bs << 'b';
 						if ((rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_LOCAL) != 0)
 							bs << 'l';
-						bs << '@-' << static_cast<unsigned>(rel.instruction_offset) << ") \e[22m";
+						bs << "@-" << static_cast<unsigned>(rel.instruction_offset) << ") \e[22m";
 					}
 					if (!rel.undefined)
 						bs << "\e[23m";

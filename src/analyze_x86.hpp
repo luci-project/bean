@@ -76,10 +76,10 @@ class AnalyzeX86 : public Analyze<C> {
 			// Find calls in exec
 			if (section.executable()) {
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
-#ifdef BEAN_VERBOSE
+
 				// For better readability, name the PLT functions
-				bool plt_name = this->debug && String::compare(section.name(), ".plt.", 5) == 0;
-#endif
+				bool plt_name = ((this->flags & Bean::FLAG_HASH_ATTRIBUTES_FOR_ID) != 0 || this->debug) && String::compare(section.name(), ".plt.", 5) == 0;
+
 				// start of current function
 				uintptr_t start = address;
 
@@ -117,7 +117,6 @@ class AnalyzeX86 : public Analyze<C> {
 
 					for (size_t g = 0; g < insn->detail->groups_count; g++) {
 						switch (insn->detail->groups[g]) {
-#ifdef BEAN_VERBOSE
 							case CS_GRP_JUMP:
 								if (plt_name) {
 									assert(insn->detail->x86.op_count == 1);
@@ -141,7 +140,7 @@ class AnalyzeX86 : public Analyze<C> {
 									}
 								}
 								break;
-#endif
+
 							case CS_GRP_CALL:
 							 {
 								auto & detail_x86 = insn->detail->x86;
@@ -683,6 +682,17 @@ class AnalyzeX86 : public Analyze<C> {
 					hash_internal_debug_strdup(sym);
 #endif
 
+				// Add additional attributes to hash
+				if ((this->flags & Bean::FLAG_HASH_ATTRIBUTES_FOR_ID) != 0) {
+					id_internal.add(sym.name);
+					id_internal.add(sym.type);
+					id_internal.add(sym.bind);
+					id_internal.add(sym.section.name);
+					id_internal.add(sym.section.writeable);
+					id_internal.add(sym.section.executable);
+					id_internal.add(sym.section.flags);
+				}
+
 				// Calculate hash
 				sym.id.internal = id_internal.hash();
 			}
@@ -750,16 +760,6 @@ class AnalyzeX86 : public Analyze<C> {
 			auto sym = this->symbols.floor(target);
 			if (sym) {
 				symbol_name = sym->name;
-				if (symbol_name == nullptr) {
-					if (sym->section.executable) {
-						// TODO: This is never freed...
-						auto buf = reinterpret_cast<char*>(Memory::alloc(18));
-						BufferStream(buf, 18) << '#' << setfill('0') << hex << setw(16) << sym->id.internal << flush;
-						symbol_name = sym->name = buf;
-					} else {
-						symbol_name = sym->section.name;
-					}
-				}
 				addend += target - sym->address;
 			} else if (type == ELF<C>::R_X86_64_NONE) {
 				if (size == 4) {
@@ -769,7 +769,7 @@ class AnalyzeX86 : public Analyze<C> {
 				}
 			}
 		}
-		if (symbol_name != nullptr && type == ELF<C>::R_X86_64_NONE) {
+		if (type == ELF<C>::R_X86_64_NONE) {
 			switch (size) {
 				case 1:
 					type = ELF<C>::R_X86_64_PC8;

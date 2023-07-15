@@ -31,6 +31,8 @@ int main(int argc, const char *argv[]) {
 			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
 		} else if (String::compare(argv[i], "-R") == 0) {
 			flags |= Bean::FLAG_RECONSTRUCT_RELOCATIONS;
+		} else if (String::compare(argv[i], "-a") == 0) {
+			flags |= Bean::FLAG_HASH_ATTRIBUTES_FOR_ID;
 		} else if (String::compare(argv[i], "-b") == 0) {
 			if (old_base == nullptr) {
 				old_base = argv[++i];
@@ -82,6 +84,7 @@ int main(int argc, const char *argv[]) {
 		     << "  -d    include dependencies" << endl
 		     << "  -s    use (external) debug symbols" << endl
 		     << "  -k    keep unused symbols" << endl
+		     << "  -a    use all symbol attributes for internal ID hash" << endl
 		     << "  -b    base directory to search for debug files" << endl
 		     << "        (if this is set a second time, it will be used for the second [new] binary)" << endl
 		     << "  -i    do not check writeable section with external ID (only internal one) " << endl

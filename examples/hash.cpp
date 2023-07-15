@@ -17,6 +17,7 @@ int main(int argc, const char *argv[]) {
 		     << "  -R    reconstruct relocations" << endl
 		     << "  -s    use (external) debug symbols" << endl
 		     << "  -k    keep unused symbols" << endl
+		     << "  -a    use all symbol attributes for internal ID hash" << endl
 		     << "  -b    base directory to search for debug files" << endl
 		     << "  -v    list address and names" << endl
 		     << "  -vv   ... and dissassemble code" << endl
@@ -33,14 +34,16 @@ int main(int argc, const char *argv[]) {
 	const char * base = nullptr;
 
 	for (int i = 1; i < argc; i++) {
-		if (String::compare(argv[i], "-r") == 0) {
-			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
-		} else if (String::compare(argv[i], "-R") == 0) {
-			flags |= Bean::FLAG_RECONSTRUCT_RELOCATIONS;
-		} else if (String::compare(argv[i], "-s") == 0) {
+		if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
 		} else if (String::compare(argv[i], "-k") == 0) {
 			flags |= Bean::FLAG_KEEP_UNUSED_SYMBOLS;
+		} else if (String::compare(argv[i], "-r") == 0) {
+			flags |= Bean::FLAG_RESOLVE_INTERNAL_RELOCATIONS;
+		} else if (String::compare(argv[i], "-R") == 0) {
+			flags |= Bean::FLAG_RECONSTRUCT_RELOCATIONS;
+		} else if (String::compare(argv[i], "-a") == 0) {
+			flags |= Bean::FLAG_HASH_ATTRIBUTES_FOR_ID;
 		} else if (String::compare(argv[i], "-b") == 0) {
 			base = argv[++i];
 		} else if (String::compare(argv[i], "-v", 2) == 0) {

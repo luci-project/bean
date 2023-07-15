@@ -326,6 +326,7 @@ struct Bean {
 		FLAG_RESOLVE_INTERNAL_RELOCATIONS = 1 << 1,
 		FLAG_RECONSTRUCT_RELOCATIONS      = 1 << 2,
 		FLAG_KEEP_UNUSED_SYMBOLS          = 1 << 3,
+		FLAG_HASH_ATTRIBUTES_FOR_ID       = 1 << 4
 	};
 
 	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS32> & elf, const ELF<ELF_Def::Identification::ELFCLASS32> * dbgsym = nullptr, uint32_t flags = 0);
