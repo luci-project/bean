@@ -5,6 +5,7 @@
 #include "capstone.hpp"
 
 #include <dlh/mem.hpp>
+#include <dlh/assert.hpp>
 #include <dlh/string.hpp>
 #include <dlh/stream/buffer.hpp>
 
@@ -52,6 +53,11 @@ extern "C" char * strcpy(char *dest, const char *src) { //NOLINT
 
 extern "C" char * strncpy(char *dest, const char *src, size_t n) {
 	return String::copy(dest, src, n);
+}
+
+extern "C" char * strcat(char* dest, const char* src) { //NOLINT
+	String::copy(dest + String::len(dest), src);
+	return dest;
 }
 
 bool capstone_dump(BufferStream & out, void * ptr, size_t size, uintptr_t start) {
