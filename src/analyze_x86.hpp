@@ -31,7 +31,7 @@ class AnalyzeX86 : public Analyze<C> {
 					assert(sec);
 					assert(rel.type() != ELF<C>::R_X86_64_IRELATIVE || sec->executable());
 					assert(!sec->tls());
-					this->insert_symbol(rel.addend(), 0, nullptr, sec->name(), sec->writeable(), sec->executable());
+					this->insert_symbol(rel.addend(), 0, nullptr, sec->virt_addr(), sec->name(), sec->writeable(), sec->executable());
 				}
 #ifdef BEAN_VERBOSE
 /*
@@ -54,7 +54,7 @@ class AnalyzeX86 : public Analyze<C> {
 			const uintptr_t addend = *reinterpret_cast<const uintptr_t *>(reinterpret_cast<uintptr_t>(rel_sec->data()) + (offset - rel_sec->virt_addr()));
 			auto addend_sec = this->sections.floor(static_cast<uintptr_t>(addend));
 			if (addend_sec)
-				this->insert_symbol(addend, 0, nullptr, addend_sec->name(), addend_sec->writeable(), addend_sec->executable());
+				this->insert_symbol(addend, 0, nullptr, addend_sec->virt_addr(), addend_sec->name(), addend_sec->writeable(), addend_sec->executable());
 		}
 	}
 
@@ -71,7 +71,7 @@ class AnalyzeX86 : public Analyze<C> {
 			// Add section start
 			uintptr_t address = section.virt_addr();
 			size_t size = section.size();
-			this->insert_symbol(Bean::TLS::trans_addr(address, section.tls()), 0, nullptr, section.name(), section.writeable(), section.executable());
+			this->insert_symbol(Bean::TLS::trans_addr(address, section.tls()), 0, nullptr, section.virt_addr(), section.name(), section.writeable(), section.executable());
 
 			// Find calls in exec
 			if (section.executable()) {
@@ -105,7 +105,7 @@ class AnalyzeX86 : public Analyze<C> {
 							start = insn->address;
 							if (ret) {
 								assert(section.executable());
-								this->insert_symbol(Bean::TLS::trans_addr(start, section.tls()), 0, nullptr, section.name(), section.writeable(), section.executable(), Elf::STT_FUNC);
+								this->insert_symbol(Bean::TLS::trans_addr(start, section.tls()), 0, nullptr, section.virt_addr(), section.name(), section.writeable(), section.executable(), Elf::STT_FUNC);
 								ret = false;
 							}
 							break;
@@ -135,7 +135,8 @@ class AnalyzeX86 : public Analyze<C> {
 											auto sec = this->sections.floor(start);
 											assert(sec);
 											assert(section.executable());
-											this->symbols.emplace(start, Bean::TLS::trans_addr(address - start, sec->tls()), name, sec->name(), sec->writeable(), sec->executable());
+											// TODO insert_symbol?
+											this->symbols.emplace(start, Bean::TLS::trans_addr(address - start, sec->tls()), name, sec->virt_addr(), sec->name(), sec->writeable(), sec->executable());
 										}
 									}
 								}
@@ -156,7 +157,7 @@ class AnalyzeX86 : public Analyze<C> {
 								// Only in executable sections
 								const auto section = this->sections.floor(target);
 								if (section && section->executable())
-									this->insert_symbol(Bean::TLS::trans_addr(target, section->tls()), 0, nullptr, section->name(), section->writeable(), true, Elf::STT_FUNC);
+									this->insert_symbol(Bean::TLS::trans_addr(target, section->tls()), 0, nullptr, section->virt_addr(), section->name(), section->writeable(), true, Elf::STT_FUNC);
 
 								break;
 							 }
@@ -447,7 +448,7 @@ class AnalyzeX86 : public Analyze<C> {
 			// 3b. generate links (from jmp + call) & hash
 			const size_t offset = address - section->virt_addr();
 			const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
-			XXHash64 id_internal(0);  // TODO seed
+			XXHash64 id_internal(id_hash_seed);
 			bool content = false;
 			if (sym.section.executable) {
 				// TLS cannot be executable
@@ -480,6 +481,13 @@ class AnalyzeX86 : public Analyze<C> {
 						case X86_INS_SYSEXIT:
 						case X86_INS_SYSRET:
 							leave = true;
+							break;
+
+						// CET instructions
+						case X86_INS_ENDBR32:
+						case X86_INS_ENDBR64:
+							sym.flags |= Bean::Symbol::SYMBOL_USING_CET;
+							leave = false;
 							break;
 
 						// Instruction does not leave
@@ -540,7 +548,8 @@ class AnalyzeX86 : public Analyze<C> {
 										// same symbol, hence just hash
 										hashbuf.push(target - sym.address);
 									} else {
-										// other symbol, add reference
+										// other symbol, push dummy and add reference
+										hashbuf.push(0xF00);
 										sym.refs.insert(target);
 #ifdef BEAN_VERBOSE
 										op_debug[o].hashed = false;
@@ -557,6 +566,8 @@ class AnalyzeX86 : public Analyze<C> {
 								if (op.mem.segment == X86_REG_FS) {
 									auto tls_end = this->tls_segment.has_value() ? Math::align_up(this->tls_segment.value().virt_addr() + this->tls_segment.value().virt_size(), this->tls_segment.value().alignment()) : 0;
 									const auto target = Bean::TLS::trans_addr(tls_end + op.mem.disp, true);
+									// push dummy and add reference
+									hashbuf.push(0xF01);
 									sym.refs.insert(target);
 #ifdef BEAN_VERBOSE
 									op_debug[o].hashed = false;
@@ -566,11 +577,22 @@ class AnalyzeX86 : public Analyze<C> {
 								// RIP relative memory access
 								if (op.mem.base == X86_REG_RIP) {
 									const auto target = insn->address + insn->size + op.mem.disp;
-									sym.refs.insert(target);
 #ifdef BEAN_VERBOSE
-									op_debug[o].hashed = false;
 									op_debug[o].value = static_cast<uintptr_t>(target);
 #endif
+									// Inside symbol?
+									if (target >= sym.address && target < sym.address + sym.size) {
+										max_branch = target;
+										// same symbol, hence just hash
+										hashbuf.push(target - sym.address);
+									} else {
+										// other symbol, push dummy and add reference
+										hashbuf.push(0xF02);
+										sym.refs.insert(target);
+#ifdef BEAN_VERBOSE
+										op_debug[o].hashed = false;
+#endif
+									}
 								} else {
 									hashbuf.push(op.mem);
 								}
@@ -862,6 +884,116 @@ class AnalyzeX86 : public Analyze<C> {
 			last_addr = sym.address;
 		}
 	}
+
+	void hash_function_offsets() {
+		TreeSet<uintptr_t> rel_targets;
+
+		// Gather all relocation targets
+		for (auto & sym : this->symbols)
+			for (auto & rel : sym.rels)
+				rel_targets.emplace(rel.target);
+
+		ByteBuffer<128> hashbuf;
+		auto next_offset = rel_targets.lowest();
+		while (next_offset) {
+			if (auto sym = this->symbols.floor(*next_offset)) {
+				uintptr_t address = sym->address;
+				size_t size = sym->size;
+
+				// Skip start of function
+				if (*next_offset == address) {
+					++next_offset;
+					if (!next_offset)
+						break;
+					if (*next_offset >= address + size)
+						continue;
+				}
+
+				// Only consider executable sections
+				if (!sym->section.executable) {
+					 ++next_offset;
+					continue;
+				}
+
+				// Load corresponding section
+				const auto section = this->sections.floor(*sym);
+				assert(section);
+
+				XXHash64 id_offset(id_hash_seed);
+				const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + address - section->virt_addr();
+				while (cs_disasm_iter(cshandle, &data, &size, &address, insn)) {
+					// Instruction is a null op - ignore
+					if (insn->id == X86_INS_NOP)
+						continue;
+
+					// Buffer for id hash
+					hashbuf.clear();
+					hashbuf.push(insn->id);  // Instruction ID (Idea: Different call instructions are no issue for comparison - TODO: Is this sufficient)
+
+					auto & detail_x86 = insn->detail->x86;
+					// Check Prefix bytes
+					for (int p = 0; p < 4 && detail_x86.prefix[p] != 0; p++)
+						hashbuf.push(detail_x86.prefix[p]);
+
+					// Check Opcode bytes
+					size_t opcode_size = 0;
+					for (int o = 0; o < 4 && detail_x86.opcode[o] != 0; o++)
+						hashbuf.push(detail_x86.opcode[o]);
+
+					// Handle operands
+					for (int o = 0; o < detail_x86.op_count; o++) {
+						auto & op = detail_x86.operands[o];
+
+						switch (op.type) {
+							case X86_OP_REG:
+								hashbuf.push(op.reg);
+								break;
+
+							case X86_OP_IMM:
+							 {
+								const auto target = static_cast<uintptr_t>(op.imm);
+								if (is_branch_instruction(insn->id))
+									hashbuf.push(target >= sym->address && target < sym->address + sym->size ? target - sym->address : 0xF00);
+								else
+									hashbuf.push(target);
+								break;
+							 }
+
+							case X86_OP_MEM:
+								if (op.mem.segment == X86_REG_FS)
+									hashbuf.push(0xF01);
+								if (op.mem.base == X86_REG_RIP) {
+									const auto target = insn->address + insn->size + op.mem.disp;
+									hashbuf.push(target >= sym->address && target < sym->address + sym->size ? target - sym->address : 0xF02);
+								} else {
+									hashbuf.push(op.mem);
+								}
+								break;
+
+							default:
+								break;
+						}
+					}
+
+					// add instruction hash buffer to hash
+					id_offset.add(hashbuf.buffer(), hashbuf.size());
+
+					if (*next_offset < address) {
+						// Add hash to list
+						sym->offset_ids.insert(*next_offset - sym->address, id_offset.hash());
+						// Get next relevant offset
+						++next_offset;
+						// No target address in range
+						if (!next_offset)
+							break;
+						assert(*next_offset >= address);
+					}
+				}
+			}
+			++next_offset;
+		}
+	}
+
 
 	/*! \brief Constructor */
 	AnalyzeX86(Bean::symtree_t & symbols, const ELF<C> &elf, const ELF<C> * dbgsym, uint32_t flags)

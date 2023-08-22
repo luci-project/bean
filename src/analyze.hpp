@@ -9,6 +9,8 @@
 #include <dlh/is_in.hpp>
 #include <bean/bean.hpp>
 
+static const uint64_t id_hash_seed = 0;
+
 template<ELFCLASS C>
 class Analyze {
 #ifdef BEAN_VERBOSE
@@ -113,7 +115,7 @@ class Analyze {
 	}
 
 	/*! \brief Insert (or, if address range is already in use, merge) symbol */
-	void insert_symbol(uintptr_t address, size_t size = 0, const char * name = nullptr, const char * section_name = nullptr, bool writeable = false, bool executable = false, Elf::sym_type type = Elf::STT_HIPROC, Elf::sym_bind bind = Elf::STB_LOCAL) {
+	void insert_symbol(uintptr_t address, size_t size = 0, const char * name = nullptr, uintptr_t section_address = 0, const char * section_name = nullptr, bool writeable = false, bool executable = false, Elf::sym_type type = Elf::STT_HIPROC, Elf::sym_bind bind = Elf::STB_LOCAL) {
 		assert(!(executable && writeable));
 		assert(!(executable && Bean::TLS::is_tls(address)));
 
@@ -141,10 +143,12 @@ class Analyze {
 
 		auto pos = symbols.find(address);
 		if (!pos || (pos->type == Bean::Symbol::TYPE_NONE && is(bean_type).in(Bean::Symbol::TYPE_OBJECT, Bean::Symbol::TYPE_FUNC))) {
-			symbols.emplace(address, size, name, section_name, writeable, executable, bean_type, bean_bind);
+			symbols.emplace(address, size, name, section_address, section_name, writeable, executable, bean_type, bean_bind);
 		} else if (bean_type != Bean::Symbol::TYPE_NONE || pos->type == Bean::Symbol::TYPE_UNKNOWN) {
 			if (pos->section.name == nullptr && section_name != nullptr)
 				pos->section.name = section_name;
+			if (pos->section.address == 0)
+				pos->section.address = section_address;
 			if (pos->size == 0) {
 				pos->section.writeable = writeable;
 				pos->section.executable = executable;
@@ -199,7 +203,7 @@ class Analyze {
 					*/
 					segments.insert(segment);
 					if (segment.size() < segment.virt_size()) {
-						insert_symbol(segment.virt_addr() + segment.size(), 0, nullptr, nullptr, segment.writeable(), segment.executable());
+						insert_symbol(segment.virt_addr() + segment.size(), 0, nullptr, segment.virt_addr(), nullptr, segment.writeable(), segment.executable());
 						section_flags.emplace_back(Bean::Symbol::Section::SECTION_NOBITS, segment.virt_addr() + segment.size(), segment.virt_size() - segment.size());
 					}
 					break;
@@ -297,7 +301,7 @@ class Analyze {
 
 				case ELF<C>::PT_GNU_RELRO:
 					section_flags.emplace_back(Bean::Symbol::Section::SECTION_RELRO, segment.virt_addr(), segment.virt_size());
-					insert_symbol(segment.virt_addr() + segment.size(), 0, nullptr, nullptr, true, false);
+					insert_symbol(segment.virt_addr() + segment.size(), 0, nullptr, 0, nullptr, true, false);
 					break;
 
 				case ELF<C>::PT_GNU_EH_FRAME:
@@ -397,7 +401,7 @@ class Analyze {
 								if (sym.type() == ELF<C>::STT_TLS) {
 									assert(sym_sec.tls());
 									assert(tls_segment.has_value());
-									insert_symbol(Bean::TLS::trans_addr(tls_segment.value().virt_addr() + sym.value(), true), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.type(), sym.bind());
+									insert_symbol(Bean::TLS::trans_addr(tls_segment.value().virt_addr() + sym.value(), true), sym.size(), sym.name(), sym_sec.virt_addr(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.type(), sym.bind());
 								} else {
 									assert(!Bean::TLS::is_tls(sym.value()));  // check for address space conflicts
 									if (sym.type() != ELF<C>::STT_NOTYPE) {
@@ -405,7 +409,7 @@ class Analyze {
 										// assert(sym.value() + sym.size() <= Math::align_up(sym_sec.virt_addr() + sym_sec.size(), sym_sec.alignment()));
 									}
 									if (sym.value() != 0 && elf_sections[sym.section_index()].allocate()) {
-										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.type(), sym.bind());
+										insert_symbol(Bean::TLS::trans_addr(sym.value(), sym_sec.tls()), sym.size(), sym.name(), sym_sec.virt_addr(), sym_sec.name(), sym_sec.writeable(), sym_sec.executable(), sym.type(), sym.bind());
 										// Make sure that the size from the symbol table is considered
 										if (sym.size() > 0)
 											insert_symbol(Bean::TLS::trans_addr(sym.value() + sym.size(), sym_sec.tls()));
@@ -424,7 +428,14 @@ class Analyze {
 
 	/*! \brief Mark symbols in relocation read-only section */
 	virtual void add_flags() {
+		if (auto sym = symbols.find(elf.header.entry()))
+			sym->flags |= Bean::Symbol::SYMBOL_ENTRY;
 		for (auto & sym : symbols) {
+			// PLT / GOT get flag trampoline
+			if (String::compare(sym.section.name, ".got") == 0)
+				sym.flags |= Bean::Symbol::SYMBOL_TRAMPOLINE;
+			else if (sym.section.executable && String::compare(sym.section.name, ".plt", 4) == 0)
+				sym.flags |= Bean::Symbol::SYMBOL_TRAMPOLINE;
 			// Mark symbols in relocation read-only section
 			for (auto & section_flag : section_flags)
 				if (sym.address >= section_flag.start && sym.address + sym.size < section_flag.start + section_flag.size)
@@ -441,6 +452,9 @@ class Analyze {
 	/*! \brief try to reconstruct stripped relocations */
 	virtual void reconstruct_relocations() {}
 
+	/*! \brief hash instructions until offset */
+	virtual void hash_function_offsets() {}
+
 	/*! \brief Create internal identifier
 	 * by hashing all position independent bytes
 	 */
@@ -454,7 +468,7 @@ class Analyze {
 	virtual void hash_external() {
 		for (auto & sym : symbols) {
 			if (!sym.rels.empty() || !sym.refs.empty()) {
-				XXHash64 id_external(0);  // TODO seed
+				XXHash64 id_external(id_hash_seed);
 				// Relocations
 				for (const auto rel : sym.rels) {
 					assert(rel.offset >= Bean::TLS::virt_addr(sym.address));
@@ -542,8 +556,10 @@ class Analyze {
 		// 4. Calculate full id using references & relocations
 		hash_external();
 
-		// 5. reconstruct relocations (if required)
-		if ((this->flags & Bean::FLAG_RECONSTRUCT_RELOCATIONS) != 0)
+		// 5. reconstruct relocations and calculate offset ids (if required)
+		if ((this->flags & Bean::FLAG_RECONSTRUCT_RELOCATIONS) != 0) {
 			reconstruct_relocations();
+			hash_function_offsets();
+		}
 	}
 };

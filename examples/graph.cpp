@@ -158,12 +158,13 @@ int main(int argc, const char *argv[]) {
 				cout << "\t}" << endl;
 			if (external)
 				cout << "\textern [style=\"filled\" color=\"#0000ff\" fontcolor=\"#ffffff\" label=<<B>EXTERN</B>>]" << endl;
-			if (entry && file.bean.symbols.find(file.binary.content.header.entry()))
-				cout << "\tentry [shape=\"oval\" style=\"filled\" color=\"#ff0000\" fontcolor=\"#ffffff\" label=<<B>ENTRY</B>>] " << endl
-				     << "\tentry -> m" << hex << file.binary.content.header.entry() << " [arrowhead=\"open\" color=\"#ff0000\" penwidth=\"2\"]" << endl;
+			if (entry)
+				cout << "\tentry [shape=\"oval\" style=\"filled\" color=\"#ff0000\" fontcolor=\"#ffffff\" label=<<B>ENTRY</B>>] " << endl;
 			for (const auto & sym : file.bean.symbols) {
 				if (external && sym.bind == Bean::Symbol::BIND_GLOBAL)
 					cout << "\textern -> m" << hex << sym.address << " [arrowhead=\"dot\" color=\"#0000ff\" penwidth=\"2\"]" << endl;
+				if (entry && sym.has(Bean::Symbol::SYMBOL_ENTRY))
+					cout << "\tentry -> m" << hex << file.binary.content.header.entry() << " [arrowhead=\"open\" color=\"#ff0000\" penwidth=\"2\"]" << endl;
 				for (const auto & ref : sym.refs) {
 					auto ref_sym = file.bean.symbols.floor(ref);
 					if (ref_sym && Bean::TLS::is_tls(ref_sym->address) == Bean::TLS::is_tls(ref)) {

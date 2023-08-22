@@ -106,8 +106,6 @@ struct Bean {
 		};
 		uint8_t instruction_access : 8;
 
-
-
 		/*! \brief Constructor using plain values */
 		SymbolRelocation(uintptr_t offset, uintptr_t type, ELF_Def::Constants::ehdr_machine machine, const char * name = nullptr, intptr_t addend = 0, bool undefined = false, uintptr_t target = 0, bool reconstructed = false, uint8_t instruction_access = ACCESSFLAG_UNKNOWN, uint8_t instruction_offset = 0)
 		  : offset(offset), type(type), name(name), addend(addend), target(target), machine(machine), undefined(undefined), reconstructed(reconstructed), instruction_offset(instruction_offset), instruction_access(instruction_access) {}
@@ -140,7 +138,7 @@ struct Bean {
 		const char * name;
 
 		/*! \brief Symbol type */
-		enum Type {
+		enum Type : uint8_t {
 			TYPE_NONE,
 			TYPE_OBJECT,
 			TYPE_FUNC,
@@ -153,14 +151,26 @@ struct Bean {
 		} type;
 
 		/*! \brief Symbol bind */
-		enum Bind {
+		enum Bind : int8_t {
 			BIND_WEAK   = -1,
 			BIND_LOCAL  = 0,
 			BIND_GLOBAL = 1,
 		} bind;
 
+		enum Flags : uint16_t {
+			SYMBOL_NONE       = 0,
+			SYMBOL_ENTRY      = 1 << 0,
+			SYMBOL_TRAMPOLINE = 1 << 1,  // PLT, GOT
+			SYMBOL_USING_CET  = 1 << 2,  // Starts with ENDBR64
+		};
+		uint16_t flags = SYMBOL_NONE;
+		static_assert(sizeof(Flags) == sizeof(flags), "Wrong flags size");
+
 		/*! \brief Section information */
 		struct Section {
+			/*! \brief Start (virtual) address */
+			uintptr_t address;
+
 			/*! \brief Section name (for debugging) */
 			const char * name = nullptr;
 
@@ -196,7 +206,7 @@ struct Bean {
 
 			/*! \brief check if section parameters match */
 			bool operator==(const Section & that) const {
-				return this->writeable == that.writeable && this->executable == that.executable && this->flags == that.flags;
+				return this->writeable == that.writeable && this->executable == that.executable && this->flags == that.flags && String::compare(this->name, that.name) == 0;
 			}
 		} section;
 
@@ -232,15 +242,24 @@ struct Bean {
 
 		/*! \brief Reference of used symbols (first = address, second = TLS?) */
 		HashSet<uintptr_t> refs;
+		// todo: include offsets so we are able to compare the stuff
 
 		/*! \brief Relocations affecting this symbol */
 		TreeSet<SymbolRelocation, SymbolAddressComparison> rels;
 
-		Symbol(uintptr_t address, size_t size, const char * name, const char * section_name, bool writeable, bool executable, Type type = TYPE_UNKNOWN, Bind bind = BIND_LOCAL, uint16_t flags = Section::SECTION_NONE)
-		  : address(address), size(size), name(name), type(type), bind(bind), section({section_name, writeable, executable, flags}), debug(nullptr) {}
+		/*! \brief Hash of instructions until offset (used by relocations) in symbol */
+		HashMap<size_t, uint64_t> offset_ids;
+
+		Symbol(uintptr_t address, size_t size, const char * name, uintptr_t section_address, const char * section_name, bool writeable, bool executable, Type type = TYPE_UNKNOWN, Bind bind = BIND_LOCAL, uint16_t flags = Section::SECTION_NONE)
+		  : address(address), size(size), name(name), type(type), bind(bind), flags(SYMBOL_NONE), section({section_address, section_name, writeable, executable, flags}), debug(nullptr) {}
 
 		Symbol(const Symbol &) = default;
 		Symbol(Symbol &&) = default;
+
+		/*! \brief check if symbol flag is set */
+		bool has(Flags flag) const {
+			return (flags & flag) != 0;
+		}
 
 		void dump_name(BufferStream& bs) const;
 
@@ -315,7 +334,7 @@ struct Bean {
 
 		static inline uint32_t hash(const Symbol& sym) { return Comparison::hash(sym.id.internal); }
 
-		static inline bool equal(const Symbol & lhs, const Symbol & rhs) { return lhs.id.internal == rhs.id.internal && lhs.section == rhs.section && lhs.refs.size() == rhs.refs.size() && lhs.rels.size() == rhs.rels.size(); }
+		static inline bool equal(const Symbol & lhs, const Symbol & rhs) { return lhs.id.internal == rhs.id.internal && lhs.section == rhs.section /* TODO: && lhs.refs.size() == rhs.refs.size() && lhs.rels.size() == rhs.rels.size() */ ; }
 	};
 
 	const symtree_t symbols;
@@ -333,6 +352,7 @@ struct Bean {
 	explicit Bean(const ELF<ELF_Def::Identification::ELFCLASS64> & elf, const ELF<ELF_Def::Identification::ELFCLASS64> * dbgsym = nullptr, uint32_t flags = 0);
 
 	static bool diet();
+	static uint64_t id_empty();
 
 	void dump(BufferStream & bs, Verbosity level = NONE) const;
 
@@ -404,6 +424,8 @@ struct Bean {
 	bool patchable(const Bean & other, bool include_dependencies = false, ComparisonMode mode = COMPARE_EXTENDED) const {
 		return patchable(diff(other, include_dependencies, mode));
 	}
+
+	TreeMap<uintptr_t, uintptr_t> map(const Bean & other, bool use_symbol_names = true);
 
 	const Symbol * get(uintptr_t address)  const  {
 		auto sym = symbols.floor(address);
