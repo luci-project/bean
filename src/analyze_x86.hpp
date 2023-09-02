@@ -61,6 +61,7 @@ class AnalyzeX86 : public Analyze<C> {
 	/*! \brief Find additional function start addresses
 	 * In dissassembled executable sections,
 	 *  - the target address of a `call` instruction and
+	 *  - `ret` with no branch/jump below the instruction
 	 *  - `ret; [nop;] endbr64` statements (when compiled with
 	 *     support for Intel CET / IBT [indirect-branch tracking])
 	 * hint a function start.
@@ -82,6 +83,9 @@ class AnalyzeX86 : public Analyze<C> {
 
 				// start of current function
 				uintptr_t start = address;
+
+				// max branch target
+				uintptr_t max_branch = start;
 
 				// was the last instruction a return (or other)?
 				bool ret = false;
@@ -107,10 +111,17 @@ class AnalyzeX86 : public Analyze<C> {
 								assert(section.executable());
 								this->insert_symbol(Bean::TLS::trans_addr(start, section.tls()), 0, nullptr, section.virt_addr(), section.name(), section.writeable(), section.executable(), Elf::STT_FUNC);
 								ret = false;
+								max_branch = start;
 							}
 							break;
 
 						default:
+							if (ret && max_branch < insn->address) {
+								start = insn->address;
+								assert(section.executable());
+								this->insert_symbol(Bean::TLS::trans_addr(start, section.tls()), 0, nullptr, section.virt_addr(), section.name(), section.writeable(), section.executable(), Elf::STT_FUNC);
+								max_branch = start;
+							}
 							ret = false;
 							break;
 					}
@@ -139,6 +150,18 @@ class AnalyzeX86 : public Analyze<C> {
 											this->symbols.emplace(start, Bean::TLS::trans_addr(address - start, sec->tls()), name, sec->virt_addr(), sec->name(), sec->writeable(), sec->executable());
 										}
 									}
+								} else {
+									auto & detail_x86 = insn->detail->x86;
+									auto & op = detail_x86.operands[detail_x86.op_count - 1];
+									uintptr_t target = 0;
+									if (op.type == X86_OP_IMM)
+										target = op.imm;
+									else if (op.type == X86_OP_MEM && op.mem.base == X86_REG_RIP)
+										target = insn->address + insn->size + op.mem.disp;
+									else
+										continue;
+									if (target > max_branch)
+										max_branch = target;
 								}
 								break;
 
