@@ -11,7 +11,7 @@ int main(int argc, const char *argv[]) {
 	// Check arguments
 	if (argc < 2) {
 		cerr << "Hash ELF binary" << endl << endl
-		     << "   Usage: " << argv[0] << " [-r] [-R] [-s] [-k] [-b FOLDER] [-v[v[v]]] ELF-FILE[S]"<< endl << endl
+		     << "   Usage: " << argv[0] << " [-r] [-R] [-a] [-s] [-k] [-b FOLDER] [-v[v[v]]] ELF-FILE[S]"<< endl << endl
 		     << "Parameters:" << endl
 		     << "  -r    resolve (internal) relocations" << endl
 		     << "  -R    reconstruct relocations" << endl
