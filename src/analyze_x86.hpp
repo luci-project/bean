@@ -1016,16 +1016,17 @@ class AnalyzeX86 : public Analyze<C> {
 					// add instruction hash buffer to hash
 					id_offset.add(hashbuf.buffer(), hashbuf.size());
 
-					if (*next_offset < address) {
+					while (next_offset && *next_offset < address) {
 						// Add hash to list
 						sym->offset_ids.insert(*next_offset - sym->address, id_offset.hash());
 						// Get next relevant offset
 						++next_offset;
-						// No target address in range
-						if (!next_offset)
-							break;
-						assert(*next_offset >= address);
 					}
+
+					if (!next_offset)
+						break;
+
+					assert(*next_offset >= address);
 				}
 			}
 			++next_offset;
