@@ -318,6 +318,17 @@ void Bean::Symbol::dump_name(BufferStream& bs) const {
 	bs << dec << size << " bytes @ 0x"
 	   << hex << address;
 
+	if (flags != SYMBOL_NONE) {
+		bs << " [";
+		if ((flags & SYMBOL_ENTRY) != 0)
+			bs << 'E';
+		if ((flags & SYMBOL_TRAMPOLINE) != 0)
+			bs << 'T';
+		if ((flags & SYMBOL_USING_CET) != 0)
+			bs << 'C';
+		bs << ']';
+	}
+
 	if (bind != Symbol::BIND_LOCAL)
 		dump_bind(bs << ", ", bind);
 
