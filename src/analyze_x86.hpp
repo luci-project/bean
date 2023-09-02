@@ -472,6 +472,8 @@ class AnalyzeX86 : public Analyze<C> {
 			const size_t offset = address - section->virt_addr();
 			const uint8_t * data = reinterpret_cast<const uint8_t *>(section->data()) + offset;
 			XXHash64 id_internal(id_hash_seed);
+			size_t trampoline_jumps = 0;
+			const size_t TRAMPOLINE_INVALID = 23;
 			bool content = false;
 			if (sym.section.executable) {
 				// TLS cannot be executable
@@ -493,6 +495,9 @@ class AnalyzeX86 : public Analyze<C> {
 						// Instruction which leave (and do not return like call)
 						case X86_INS_JMP:
 						case X86_INS_LJMP:
+							trampoline_jumps++;
+							leave = true;
+							break;
 						case X86_INS_RET:
 						case X86_INS_RETF:
 						case X86_INS_RETFQ:
@@ -503,6 +508,7 @@ class AnalyzeX86 : public Analyze<C> {
 						case X86_INS_IRETQ:
 						case X86_INS_SYSEXIT:
 						case X86_INS_SYSRET:
+							trampoline_jumps = TRAMPOLINE_INVALID;
 							leave = true;
 							break;
 
@@ -515,6 +521,7 @@ class AnalyzeX86 : public Analyze<C> {
 
 						// Instruction does not leave
 						default:
+							trampoline_jumps = TRAMPOLINE_INVALID;
 							leave = false;
 					}
 					last_instruction = address;  // Ignores nop
@@ -567,6 +574,7 @@ class AnalyzeX86 : public Analyze<C> {
 #endif
 									// Inside symbol?
 									if (target >= sym.address && target < sym.address + sym.size) {
+										trampoline_jumps = TRAMPOLINE_INVALID;
 										max_branch = target;
 										// same symbol, hence just hash
 										hashbuf.push(target - sym.address);
@@ -579,6 +587,7 @@ class AnalyzeX86 : public Analyze<C> {
 #endif
 									}
 								} else {
+									trampoline_jumps = TRAMPOLINE_INVALID;
 									hashbuf.push(target);
 								}
 								break;
@@ -587,6 +596,7 @@ class AnalyzeX86 : public Analyze<C> {
 							case X86_OP_MEM:
 								// Handle FS segment (TLS in Linux)
 								if (op.mem.segment == X86_REG_FS) {
+									trampoline_jumps = TRAMPOLINE_INVALID;
 									auto tls_end = this->tls_segment.has_value() ? Math::align_up(this->tls_segment.value().virt_addr() + this->tls_segment.value().virt_size(), this->tls_segment.value().alignment()) : 0;
 									const auto target = Bean::TLS::trans_addr(tls_end + op.mem.disp, true);
 									// push dummy and add reference
@@ -617,6 +627,7 @@ class AnalyzeX86 : public Analyze<C> {
 #endif
 									}
 								} else {
+									trampoline_jumps = TRAMPOLINE_INVALID;
 									hashbuf.push(op.mem);
 								}
 								break;
@@ -651,6 +662,10 @@ class AnalyzeX86 : public Analyze<C> {
 							break;
 					}
 				}
+
+				// Mark trampoline function
+				if (trampoline_jumps == 1)
+					sym.flags |= Bean::Symbol::SYMBOL_TRAMPOLINE;
 
 				// If it doesn't end with a leave instruction (ret), or a branch jumps beyond it, we have to link it to the next function (fallthrough)
 				if (!leave || max_branch > last_instruction) {
