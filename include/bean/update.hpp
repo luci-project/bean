@@ -16,6 +16,7 @@ struct BeanUpdate {
 		FLAG_ONLY_EXECUTABLE     = 1 << 1,
 		FLAG_ONLY_BRANCH_RELS    = 1 << 2,
 		FLAG_INCLUDE_TRAMPOLINES = 1 << 3,
+		FLAG_IGNORE_LOCAL_RELS   = 1 << 4,
 	};
 	uint32_t flags = FLAG_NONE;
 
@@ -84,7 +85,7 @@ struct BeanUpdate {
 					bool is_local = (rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_LOCAL) != 0;
 
 					bool insert_redirect = false;
-					if (is_func && is_branch && is_local) {
+					if (is_func && is_branch && is_local && (flags & FLAG_IGNORE_LOCAL_RELS) == 0) {
 						// If the target offset id is identical, the control flow can be redirected
 						const auto old_target_offset_id = from_sym.offset_ids.find(rel.target - from_sym.address);
 						const auto new_target_offset_id = new_target_sym->offset_ids.find(new_target->value - new_target_sym->address);
