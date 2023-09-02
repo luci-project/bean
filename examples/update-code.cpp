@@ -8,31 +8,93 @@
 #include <dlh/is_in.hpp>
 
 #include <bean/file.hpp>
+#include <bean/update.hpp>
+
+Bean::Verbosity verbose = Bean::NONE;
+
+struct Data {
+	BeanFile file;
+	const char * path;
+
+	void dump(uintptr_t address) {
+		cout << path << ":0x" << hex << address;
+		if (const auto & sym = file.bean.symbols.floor(address)) {
+			cout << " (";
+			if (String::len(sym->name) > 0)
+				cout << sym->name;
+			else
+				sym->id.dump(cout);
+			cout << " + " << dec << address - sym->address << ')';
+		}
+	}
+
+	void header(uintptr_t address) {
+		static uintptr_t prev = -1;
+		if (const auto & sym = file.bean.symbols.floor(address))
+			if (sym->address != prev) {
+				sym->dump(cout << endl, verbose, &file.bean.symbols);
+				prev = sym->address;
+			}
+	}
+};
+
+static bool redirect(uintptr_t from, uintptr_t to, size_t size, Data * custom) {
+	custom[0].header(from);
+	cout << "\e[33m - redirecting ";
+	custom[0].dump(from);
+	if (size > 0)
+		cout << " [" << size << " bytes]";
+	cout << " to ";
+	custom[1].dump(to);
+	cout << "\e[0m" << endl;
+	return true;
+}
+
+static bool relocate(const Bean::SymbolRelocation & rel, uintptr_t to, const Bean::Symbol & target, Data * custom) {
+	custom[0].header(rel.offset);
+	(void)target;
+	cout << "\e[32m - relocating ";
+	custom[0].dump(rel.offset);
+	cout << " to ";
+	custom[1].dump(to);
+	cout << "\e[0m" << endl;
+	return true;
+}
+
+static void skipmsg(uintptr_t from, uintptr_t to, const char * reason, Data * custom) {
+	custom[0].header(from);
+	cout << "\e[31m - skipping ";
+	custom[0].dump(from);
+	if (to != 0) {
+		cout << " to ";
+		custom[1].dump(to);
+	}
+	if (reason != nullptr)
+		cout << " - " << reason;
+	cout << "\e[0m" << endl;
+}
 
 int main(int argc, const char *argv[]) {
-	Bean::Verbosity verbose = Bean::NONE;
 	Bean::ComparisonMode comparison_mode = Bean::COMPARE_EXTENDED;
 	uint32_t flags = Bean::FLAG_NONE;
 	bool dbgsym = false;
-	bool only_branch = false;
-	bool only_executable = false;
-	bool use_symbol_names = false;
+	uint32_t update_flags = BeanUpdate::FLAG_NONE;
 	const char * old_base = nullptr;
 	const char * new_base = nullptr;
 	const char * old_path = nullptr;
 	const char * new_path = nullptr;
-	BeanFile * a = nullptr;
-	BeanFile * b = nullptr;
 
 	for (int i = 1; i < argc; i++) {
 		 if (String::compare(argv[i], "-s") == 0) {
 			dbgsym = true;
 		} else if (String::compare(argv[i], "-n") == 0) {
-			use_symbol_names = false;
+			update_flags |= BeanUpdate::FLAG_USE_SYMBOL_NAMES;
+		} else if (String::compare(argv[i], "-t") == 0) {
+			update_flags |= BeanUpdate::FLAG_INCLUDE_TRAMPOLINES;
 		} else if (String::compare(argv[i], "-B") == 0) {
-			only_branch = true;
+			update_flags |= BeanUpdate::FLAG_ONLY_BRANCH_RELS;
 		} else if (String::compare(argv[i], "-X") == 0) {
-			only_executable = true;
+			update_flags |= BeanUpdate::FLAG_ONLY_EXECUTABLE;
 		} else if (String::compare(argv[i], "-k") == 0) {
 			flags |= Bean::FLAG_KEEP_UNUSED_SYMBOLS;
 		} else if (String::compare(argv[i], "-r") == 0) {
@@ -85,13 +147,14 @@ int main(int argc, const char *argv[]) {
 
 	if (new_path == nullptr && new_base == nullptr) {
 		cerr << "Check how OLD ELF functions would redirect to NEW" << endl << endl
-		     << "   Usage: " << argv[0] << " [-r] [-R] [-n] [-s] [-k] [-m[THRESHOLD]] [-b [OLD]BASE [-b NEWBASE]] [-v[v[v]]] OLD NEW" << endl
+		     << "   Usage: " << argv[0] << " [-r] [-R] [-B] [-X] [-n] [-t] [-s] [-k] [-m[THRESHOLD]] [-b [OLD]BASE [-b NEWBASE]] [-v[v[v]]] OLD NEW" << endl
 		     << "Parameters:" << endl
 		     << "  -r    resolve (internal) relocations" << endl
 		     << "  -R    reconstruct relocations" << endl
 		     << "  -B    consider only relocations on branching instructions" << endl
 		     << "  -X    consider only relocations to executable section" << endl
 		     << "  -n    ignore symbol names" << endl
+			 << "  -t    include trampoline symbols" << endl
 		     << "  -s    use (external) debug symbols" << endl
 		     << "  -k    keep unused symbols" << endl
 		     << "  -a    use all symbol attributes for internal ID hash" << endl
@@ -108,58 +171,10 @@ int main(int argc, const char *argv[]) {
 		return EXIT_FAILURE;
 	}
 
-	BeanFile old_file(old_path, dbgsym, flags, old_base);
-	BeanFile new_file(new_path == nullptr ? old_path : new_path, dbgsym, flags, new_base == nullptr ? old_base : new_base);
-
-	const auto & map = old_file.bean.map(new_file.bean, use_symbol_names);
-
-	for (const auto & sym : old_file.bean.symbols) {
-		if (sym.rels.empty())
-			continue;
-		sym.dump(cout, verbose, &old_file.bean.symbols);
-		bool is_func = sym.section.executable && is(sym.type).in(Bean::Symbol::TYPE_UNKNOWN, Bean::Symbol::TYPE_FUNC, Bean::Symbol::TYPE_INDIRECT_FUNC);
-
-		// Full redirect
-		if (is_func) {
-			if (const auto & new_target_sym = new_file.bean.symbols.floor(sym.address)) {
-				auto address = sym.address;
-				// endbr instruction is 4 bytes
-				if ((sym.flags & Bean::Symbol::SYMBOL_USING_CET) != 0)
-					address += 4;
-				cout << "\e[32m - redirecting " << hex << old_path << ':' << address << " to " << new_path << ':' << new_target_sym->address << "\e[0m" << endl;
-			}
-		}
-		// Check all relocations
-		for (const auto rel : sym.rels) {
-			// for each relocation target check if there is a new one
-			if (const auto new_target = map.find(rel.target)) {
-				// The symbol to which the target maps
-				const auto & new_target_sym = new_file.bean.symbols.floor(new_target->value);
-				assert(new_target_sym);
-				if (only_executable && !new_target_sym->section.executable)
-					continue;
-
-				// check relocation information
-				bool is_branch = (rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_BRANCH) != 0;
-				if (only_branch && !is_branch)
-					continue;
-				bool is_local = (rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_LOCAL) != 0;
-
-				if (is_func && is_branch && is_local) {
-					// If the target offset id is identical, the control flow can be redirected
-					const auto old_target_offset_id = sym.offset_ids.find(rel.target - sym.address);
-					const auto new_target_offset_id = new_target_sym->offset_ids.find(new_target->value - new_target_sym->address);
-					if (old_target_offset_id && new_target_offset_id && old_target_offset_id->value == new_target_offset_id->value)
-						cout << "\e[32m - redirecting " << hex << old_path << ':' << (rel.offset - rel.instruction_offset) << " to " << new_path << ':' << new_target->value << "\e[0m" << endl;
-					else
-						cout << "\e[31m - skipping " << hex << old_path << ':' << (rel.offset - rel.instruction_offset) << " - different offset ID between " << rel.target << " and " << new_target->value << "\e[0m" << endl;
-				} else {
-					cout << "\e[32m - relocating " << hex << old_path << ':' << rel.offset << " to " << new_path << ':' << new_target->value << "\e[0m" << endl;
-				}
-			} else {
-				cout << "\e[31m - skipping " << hex << old_path << ':' << rel.offset << " - no target found\e[0m" << endl;
-			}
-		}
-		cout << "\e[0m" << endl;
-	}
+	Data data[2] = {
+		{ BeanFile{old_path, dbgsym, flags, old_base}, old_path},
+		{ BeanFile{new_path == nullptr ? old_path : new_path, dbgsym, flags, new_base == nullptr ? old_base : new_base}, new_path}
+	};
+	BeanUpdate updater(update_flags);
+	updater.process<Data, redirect, relocate, skipmsg>(data[0].file.bean, data[1].file.bean, 0, 0, data);
 }
