@@ -124,10 +124,10 @@ const Bean::symtree_t Bean::diff(const Bean & other, bool include_dependencies, 
 	}
 }
 
-TreeMap<uintptr_t, uintptr_t> Bean::map(const Bean & other, bool use_symbol_names) {
+TreeMap<uintptr_t, uintptr_t> Bean::map(const Bean & other, bool use_symbol_names) const {
 	// Mapping this -> other
 	TreeMap<uintptr_t, uintptr_t> mapping;
-	// Skip Symbols which are not unique
+	// Skip Symbols which are not unique or in PLT
 	HashSet<uintptr_t> skip;
 	// skip non-unique internal id
 	HashSet<uint64_t> skip_internal_id;
@@ -164,9 +164,8 @@ TreeMap<uintptr_t, uintptr_t> Bean::map(const Bean & other, bool use_symbol_name
 			const auto to_rel = to.rels.begin();
 			for (; from_rel != from.rels.end(); ++from_rel, ++to_rel) {
 				assert(to_rel != to.rels.end());
-				if (!from_rel->undefined && !to_rel->undefined && (from_rel->offset - from.address) == (to_rel->offset - to.address) && from_rel->type == to_rel->type && from_rel->addend == to_rel->addend) {
+				if (!from_rel->undefined && !to_rel->undefined && (from_rel->offset - from.address) == (to_rel->offset - to.address) && from_rel->type == to_rel->type && from_rel->addend == to_rel->addend)
 					insert_mapping(from_rel->target, to_rel->target);
-				}
 			}
 		}
 	};
@@ -227,7 +226,7 @@ TreeMap<uintptr_t, uintptr_t> Bean::map(const Bean & other, bool use_symbol_name
 	 {
 		const symhash_t other_symbols(other.symbols);
 		for (const auto & sym : this->symbols) {
-			if (const auto other_sym = other_symbols.find(sym)) {
+			if (const auto & other_sym = other_symbols.find(sym)) {
 				insert_mapping(sym.address, other_sym->address);
 				process_relocations(sym, *other_sym);
 			}
@@ -240,11 +239,27 @@ TreeMap<uintptr_t, uintptr_t> Bean::map(const Bean & other, bool use_symbol_name
 		for (const auto & sym : this->symbols)
 			if (skip_internal_id.contains(sym.id.internal))
 				continue;
-			else if (const auto other_sym = other_symbols.find(sym))
+			else if (const auto & other_sym = other_symbols.find(sym))
 				process_relocations(sym, *other_sym);
 	 }
 
-	// TODO: Update relocations only if internal ID is identical!
+	// now check internal relocations of matching functions
+	 {
+		for (const auto & sym : this->symbols)
+			if (skip_internal_id.contains(sym.id.internal))
+				continue;
+			else if (const auto & map_sym = mapping.find(sym.address))
+				if (const auto & other_sym = other.symbols.find(map_sym->value))
+					for (const auto & rel : sym.rels)
+						if ((rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_BRANCH) != 0 && (rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_LOCAL) != 0) {
+							const auto offset = rel.target - sym.address;
+							const auto from_offset_id = sym.offset_ids.find(offset);
+							const auto to_offset_id = other_sym->offset_ids.find(offset);  // Identical offset
+							if (from_offset_id && to_offset_id && from_offset_id->value == to_offset_id->value)
+								insert_mapping(rel.target, other_sym->address + offset);
+						}
+	 }
+
 
 	// Cleanup
 	for (const auto address : skip)

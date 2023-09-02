@@ -425,7 +425,7 @@ struct Bean {
 		return patchable(diff(other, include_dependencies, mode));
 	}
 
-	TreeMap<uintptr_t, uintptr_t> map(const Bean & other, bool use_symbol_names = true);
+	TreeMap<uintptr_t, uintptr_t> map(const Bean & other, bool use_symbol_names = true) const;
 
 	const Symbol * get(uintptr_t address)  const  {
 		auto sym = symbols.floor(address);
