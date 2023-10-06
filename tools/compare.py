@@ -32,6 +32,7 @@ parser.add_argument('--hashtool', help="the bean dwarf variable hash tool", defa
 parser.add_argument('-m', '--matrix', help='Compare each version with each other', action='store_true')
 parser.add_argument('-l', '--lib', help='filter library names (by regex)', nargs='*')
 parser.add_argument('-s', '--dbgsym', action='store_true', help='use (external?) debug symbols in difftool')
+parser.add_argument('-S', '--shared', action='store_true', help='limit to shared object files (.so)')
 parser.add_argument('-N', '--nodbgsym', action='store_true', help='do not use debug symbols in hashtool')
 parser.add_argument('-d', '--dependencies', action='store_true', help='recursively check all dependencies')
 parser.add_argument('-r', '--relocations', action='store_true', help='resolve internal relocations')
@@ -61,7 +62,11 @@ for d in base.glob("*/"):
 				continue
 
 		o=set()
-		for f in d.rglob('*.so*'):
+		if args.shared:
+			dglob = d.rglob('*.so*')
+		else:
+			dglob = d.glob('*')
+		for f in dglob:
 			if f.is_file():
 				with open(f, mode="rb") as elf:
 					if elf.read(4) == b"\x7fELF":
