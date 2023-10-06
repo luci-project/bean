@@ -79,7 +79,12 @@ class AnalyzeX86 : public Analyze<C> {
 				const uint8_t * data = reinterpret_cast<const uint8_t *>(section.data());
 
 				// For better readability, name the PLT functions
-				bool plt_name = ((this->flags & Bean::FLAG_HASH_ATTRIBUTES_FOR_ID) != 0 || this->debug) && String::compare(section.name(), ".plt.", 5) == 0;
+				bool check_plt_name = (this->flags & Bean::FLAG_HASH_ATTRIBUTES_FOR_ID) != 0;
+#ifdef BEAN_VERBOSE
+				if (this->debug)
+					check_plt_name = true;
+#endif
+				bool plt_name = check_plt_name && String::compare(section.name(), ".plt.", 5) == 0;
 
 				// start of current function
 				uintptr_t start = address;
@@ -690,6 +695,7 @@ class AnalyzeX86 : public Analyze<C> {
 
 				// Symbols of writeable sections (.data) are depending on the alignment of their (virtual) address
 				if (sym.section.writeable && (sym.section.flags & Bean::Symbol::Section::SECTION_RELRO) == 0) {
+					// TODO: Section offset?
 					id_internal.add<uint32_t>(address % this->page_size);
 				}
 
@@ -764,26 +770,23 @@ class AnalyzeX86 : public Analyze<C> {
 	}
 
  private:
-	bool create_relocation(Bean::Symbol & sym, uintptr_t address, uint8_t offset, uintptr_t target, uint8_t size, intptr_t addend, bool branch, uint8_t op_access) {
+	bool create_relocation(Bean::Symbol & sym, uintptr_t address, uint8_t offset, uintptr_t target, uint8_t size, intptr_t addend, uint8_t access_flags, uint8_t op_access) {
 		// Access bits
-		uint8_t access = 0;
 		if ((op_access & CS_AC_READ) != 0)
-			access |= Bean::SymbolRelocation::ACCESSFLAG_READ;
+			access_flags |= Bean::SymbolRelocation::ACCESSFLAG_READ;
 		if ((op_access & CS_AC_WRITE) != 0)
-			access |= Bean::SymbolRelocation::ACCESSFLAG_WRITE;
-		if (branch)
-			access |= Bean::SymbolRelocation::ACCESSFLAG_BRANCH;
+			access_flags |= Bean::SymbolRelocation::ACCESSFLAG_WRITE;
 
 		// internal relocations (referencing inside a function, e.g. loops)
 		if (target >= sym.address && target < sym.address + sym.size)
-			access |= Bean::SymbolRelocation::ACCESSFLAG_LOCAL;
+			access_flags |= Bean::SymbolRelocation::ACCESSFLAG_LOCAL;
 
 		// Adress of relocation
 		uintptr_t rel_address = address + offset;
 
 		// Update & skip existing relocations
 		if (auto target_sym = sym.rels.find(target)) {
-			target_sym->instruction_access |= access;
+			target_sym->instruction_access |= access_flags;
 			target_sym->instruction_offset = offset;
 			return false;
 		}
@@ -845,7 +848,7 @@ class AnalyzeX86 : public Analyze<C> {
 					break;
 			}
 		}
-		return sym.rels.emplace(rel_address, type, this->elf.header.machine(), symbol_name, addend, false, target, true, access, offset).second;
+		return sym.rels.emplace(rel_address, type, this->elf.header.machine(), symbol_name, addend, false, target, true, access_flags, offset).second;
 	}
 
  public:
@@ -897,8 +900,10 @@ class AnalyzeX86 : public Analyze<C> {
 
 						switch (op.type) {
 							case X86_OP_IMM:
-								if (is_branch_instruction(insn->id))
-									create_relocation(sym, insn->address, detail_x86.encoding.imm_offset, static_cast<uintptr_t>(op.imm), detail_x86.encoding.imm_size, -1 * (insn->size - detail_x86.encoding.imm_offset), true, op.access);
+								if (is_branch_instruction(insn->id)) {
+									uint8_t flags = Bean::SymbolRelocation::ACCESSFLAG_BRANCH | (insn->id == X86_INS_JMP || insn->id == X86_INS_CALL ? 0 : Bean::SymbolRelocation::ACCESSFLAG_CONDITIONAL);
+									create_relocation(sym, insn->address, detail_x86.encoding.imm_offset, static_cast<uintptr_t>(op.imm), detail_x86.encoding.imm_size, -1 * (insn->size - detail_x86.encoding.imm_offset), flags, op.access);
+								}
 								break;
 
 							case X86_OP_MEM:
@@ -910,7 +915,7 @@ class AnalyzeX86 : public Analyze<C> {
 								}
 								// RIP relative memory access
 								if (op.mem.base == X86_REG_RIP)
-									create_relocation(sym, insn->address, detail_x86.encoding.disp_offset, insn->address + insn->size + op.mem.disp, detail_x86.encoding.disp_size, -1 * (insn->size - detail_x86.encoding.disp_offset), false, op.access);
+									create_relocation(sym, insn->address, detail_x86.encoding.disp_offset, insn->address + insn->size + op.mem.disp, detail_x86.encoding.disp_size, -1 * (insn->size - detail_x86.encoding.disp_offset), 0, op.access);
 								break;
 
 							default:
@@ -926,10 +931,13 @@ class AnalyzeX86 : public Analyze<C> {
 	void hash_function_offsets() {
 		TreeSet<uintptr_t> rel_targets;
 
-		// Gather all relocation targets
+		// Gather all relocation instructions and targets
 		for (auto & sym : this->symbols)
-			for (auto & rel : sym.rels)
+			for (auto & rel : sym.rels) {
+				if ((rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_LOCAL) != 0)
+					rel_targets.emplace(rel.offset - rel.instruction_offset);
 				rel_targets.emplace(rel.target);
+			}
 
 		ByteBuffer<128> hashbuf;
 		auto next_offset = rel_targets.lowest();

@@ -102,7 +102,8 @@ struct Bean {
 			ACCESSFLAG_READ         = 1 << 0,  // Read
 			ACCESSFLAG_WRITE        = 1 << 1,  // Write
 			ACCESSFLAG_BRANCH       = 1 << 2,  // branching instruction
-			ACCESSFLAG_LOCAL        = 1 << 3,  // target in function scope
+			ACCESSFLAG_CONDITIONAL  = 1 << 3,  // conditional (branching) instruction
+			ACCESSFLAG_LOCAL        = 1 << 4,  // target in function scope
 		};
 		uint8_t instruction_access : 8;
 
