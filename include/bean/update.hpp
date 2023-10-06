@@ -89,18 +89,27 @@ struct BeanUpdate {
 						// If the target offset id is identical, the control flow can be redirected
 						const auto old_target_offset_id = from_sym.offset_ids.find(rel.target - from_sym.address);
 						const auto new_target_offset_id = new_target_sym->offset_ids.find(new_target->value - new_target_sym->address);
-						if (old_target_offset_id && new_target_offset_id && old_target_offset_id->value == new_target_offset_id->value)
-							insert_redirect = true;
-						else if (SKIPMSG != nullptr)
+						if (old_target_offset_id && new_target_offset_id && old_target_offset_id->value == new_target_offset_id->value && (
+							(RELOCATE != nullptr && RELOCATE(rel, new_target->value + to_base, *new_target_sym, custom_data)) ||
+							(REDIRECT != nullptr && (rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_CONDITIONAL) == 0 && REDIRECT(rel.offset - rel.instruction_offset + from_base, new_target->value + to_base, 0, custom_data))
+						)) {
+							continue;
+						}
+						// For other cases like conditional branches, we have to redirect to the branch instruction
+						uintptr_t inst_offset = rel.offset - from_sym.address - rel.instruction_offset;
+						const auto old_branch_offset_id = from_sym.offset_ids.find(inst_offset);
+						const auto new_branch_offset_id = new_target_sym->offset_ids.find(inst_offset);
+						if (old_branch_offset_id && new_branch_offset_id && old_branch_offset_id->value == new_branch_offset_id->value && REDIRECT != nullptr && REDIRECT(rel.offset - rel.instruction_offset + from_base, new_target_sym->address + inst_offset + to_base, 0, custom_data))
+							continue;
+
+						if (SKIPMSG != nullptr)
 							SKIPMSG(rel.offset - rel.instruction_offset + from_base, new_target->value + to_base, "different offset ID", custom_data);
 					} else if (same_internal_id) {
-						if (RELOCATE != nullptr)
-							insert_redirect = !RELOCATE(rel, new_target->value + to_base, *new_target_sym, custom_data);
+						if ((RELOCATE == nullptr || !RELOCATE(rel, new_target->value + to_base, *new_target_sym, custom_data)) && REDIRECT != nullptr)
+							REDIRECT(rel.offset - rel.instruction_offset + from_base, new_target->value + to_base, 0, custom_data);
 					} else if (SKIPMSG != nullptr) {
 						SKIPMSG(rel.offset + from_base, new_target->value + to_base, "different internal ID", custom_data);
 					}
-					if (insert_redirect && REDIRECT != nullptr)
-						REDIRECT(rel.offset - rel.instruction_offset + from_base, new_target->value + to_base, 0, custom_data);
 				} else if (SKIPMSG != nullptr) {
 					SKIPMSG(rel.offset + from_base, 0, "no target found", custom_data);
 				}

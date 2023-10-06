@@ -64,9 +64,9 @@ struct ElfFile {
 };
 
 struct BeanFile {
+	char path[PATH_MAX + 1] = { '\0' };
 	const ElfFile binary;
 	const ElfFile * dbgsym = nullptr;
-	char path[PATH_MAX + 1] = { '\0' };
 
 	Bean bean;
 
