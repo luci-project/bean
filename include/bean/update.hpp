@@ -91,8 +91,7 @@ struct BeanUpdate {
 						const auto new_target_offset_id = new_target_sym->offset_ids.find(new_target->value - new_target_sym->address);
 						if (old_target_offset_id && new_target_offset_id && old_target_offset_id->value == new_target_offset_id->value && (
 							(RELOCATE != nullptr && RELOCATE(rel, new_target->value + to_base, *new_target_sym, custom_data)) ||
-							(REDIRECT != nullptr && (rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_CONDITIONAL) == 0 && REDIRECT(rel.offset - rel.instruction_offset + from_base, new_target->value + to_base, 0, custom_data))
-						)) {
+							(REDIRECT != nullptr && (rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_CONDITIONAL) == 0 && REDIRECT(rel.offset - rel.instruction_offset + from_base, new_target->value + to_base, 0, custom_data)))) {
 							continue;
 						}
 						// For other cases like conditional branches, we have to redirect to the branch instruction
