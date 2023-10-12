@@ -633,7 +633,11 @@ class AnalyzeX86 : public Analyze<C> {
 									}
 								} else {
 									trampoline_jumps = TRAMPOLINE_INVALID;
-									hashbuf.push(op.mem);
+									hashbuf.push(op.mem.segment);
+									hashbuf.push(op.mem.base);
+									hashbuf.push(op.mem.index);
+									hashbuf.push(op.mem.scale);
+									hashbuf.push(op.mem.disp);
 								}
 								break;
 
