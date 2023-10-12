@@ -921,7 +921,7 @@ class AnalyzeX86 : public Analyze<C> {
 								// Handle FS segment (TLS in Linux)
 								if (op.mem.segment == X86_REG_FS) {
 									auto tls_end = this->tls_segment.has_value() ? Math::align_up(this->tls_segment.value().virt_addr() + this->tls_segment.value().virt_size(), this->tls_segment.value().alignment()) : 0;
-									create_relocation(sym, insn->address, detail_x86.encoding.disp_offset,Bean::TLS::trans_addr(tls_end + op.mem.disp, true), detail_x86.encoding.disp_size, op.mem.disp, 0, op.access);
+									create_relocation(sym, insn->address, detail_x86.encoding.disp_offset, Bean::TLS::trans_addr(tls_end + op.mem.disp, true), detail_x86.encoding.disp_size, op.mem.disp, 0, op.access);
 								}
 								// RIP relative memory access
 								if (op.mem.base == X86_REG_RIP)
