@@ -955,6 +955,7 @@ class AnalyzeX86 : public Analyze<C> {
 			if (auto sym = this->symbols.floor(*next_offset)) {
 				uintptr_t address = sym->address;
 				size_t size = sym->size;
+				auto next_rel = sym->rels.lowest();
 
 				// Skip start of function
 				if (*next_offset == address) {
@@ -982,6 +983,13 @@ class AnalyzeX86 : public Analyze<C> {
 					if (insn->id == X86_INS_NOP)
 						continue;
 
+					while (next_offset && *next_offset < address) {
+						// Add hash to list
+						sym->offset_ids.insert(*next_offset - sym->address, id_offset.hash());
+						// Get next relevant offset
+						++next_offset;
+					}
+
 					// Buffer for id hash
 					hashbuf.clear();
 					hashbuf.push(insn->id);  // Instruction ID (Idea: Different call instructions are no issue for comparison - TODO: Is this sufficient)
@@ -1006,23 +1014,17 @@ class AnalyzeX86 : public Analyze<C> {
 								break;
 
 							case X86_OP_IMM:
-							 {
-								const auto target = static_cast<uintptr_t>(op.imm);
-								if (is_branch_instruction(insn->id))
-									hashbuf.push(target >= sym->address && target < sym->address + sym->size ? target - sym->address : 0xF00);
-								else
-									hashbuf.push(target);
+								if (!is_branch_instruction(insn->id))
+									hashbuf.push(static_cast<uintptr_t>(op.imm));
 								break;
-							 }
 
 							case X86_OP_MEM:
-								if (op.mem.segment == X86_REG_FS)
-									hashbuf.push(0xF01);
-								if (op.mem.base == X86_REG_RIP) {
-									const auto target = insn->address + insn->size + op.mem.disp;
-									hashbuf.push(target >= sym->address && target < sym->address + sym->size ? target - sym->address : 0xF02);
-								} else {
-									hashbuf.push(op.mem);
+								if (op.mem.base != X86_REG_RIP) {
+									hashbuf.push(op.mem.segment);
+									hashbuf.push(op.mem.base);
+									hashbuf.push(op.mem.index);
+									hashbuf.push(op.mem.scale);
+									hashbuf.push(op.mem.disp);
 								}
 								break;
 
@@ -1031,15 +1033,29 @@ class AnalyzeX86 : public Analyze<C> {
 						}
 					}
 
+					// Include targets of (recovered) relocations
+					while(next_rel && next_rel->offset < address) {
+						if (next_rel->target == 0) {
+							// Unresolved target: add full relocation info
+							if (next_rel->name != nullptr && next_rel->name[0] != '\0')
+								hashbuf.push(next_rel->name);
+							hashbuf.push(next_rel->addend);
+						} else if (next_rel->target >= sym->address && next_rel->target < sym->address + sym->size) {
+							hashbuf.push(0x10ca1);  // do *not* use internal ID since it is allowed to change
+							hashbuf.push(next_rel->target - sym->address);  // add offset
+						} else if (auto rel_sym = this->symbols.floor(next_rel->target)) {
+							hashbuf.push(rel_sym->id.internal);  // use internal ID of resolved object
+							hashbuf.push(next_rel->target - rel_sym->address);  // add offset
+						} else {
+							// Unknown relocation
+							assert(false);
+							hashbuf.push(next_rel->target);
+						}
+						++next_rel;
+					}
+
 					// add instruction hash buffer to hash
 					id_offset.add(hashbuf.buffer(), hashbuf.size());
-
-					while (next_offset && *next_offset < address) {
-						// Add hash to list
-						sym->offset_ids.insert(*next_offset - sym->address, id_offset.hash());
-						// Get next relevant offset
-						++next_offset;
-					}
 
 					if (!next_offset)
 						break;
