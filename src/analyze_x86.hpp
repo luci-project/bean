@@ -808,48 +808,55 @@ class AnalyzeX86 : public Analyze<C> {
 				section_name = sec->name();
 		}
 
-		if (size == 4 && section_name != nullptr) {
-			if (String::compare(section_name, ".plt", 4) == 0) {
-				type = ELF<C>::R_X86_64_PLT32;
-			} else if (String::compare(section_name, ".got", 4) == 0) {
-				type = ELF<C>::R_X86_64_GOTPCREL;
-				if (auto rel = this->relocations.find(target)) {
-					if (rel->symbol_index() != 0) {
-						// Get relocation symbol
-						const auto rel_sym = rel->symbol();
-						if (rel_sym.section_index() == ELF<C>::SHN_UNDEF)
-							symbol_name = rel_sym.name();
+		if (Bean::TLS::is_tls(target))  {
+			if (size == 4)
+				type = ELF<C>::R_X86_64_TPOFF32;
+			else if (size == 8)
+				type = ELF<C>::R_X86_64_TPOFF64;
+		} else {
+			if (size == 4 && section_name != nullptr) {
+				if (String::compare(section_name, ".plt", 4) == 0) {
+					type = ELF<C>::R_X86_64_PLT32;
+				} else if (String::compare(section_name, ".got", 4) == 0) {
+					type = ELF<C>::R_X86_64_GOTPCREL;
+					if (auto rel = this->relocations.find(target)) {
+						if (rel->symbol_index() != 0) {
+							// Get relocation symbol
+							const auto rel_sym = rel->symbol();
+							if (rel_sym.section_index() == ELF<C>::SHN_UNDEF)
+								symbol_name = rel_sym.name();
+						}
 					}
 				}
 			}
-		}
-		if (symbol_name == nullptr) {
-			auto sym = this->symbols.floor(target);
-			if (sym) {
-				symbol_name = sym->name;
-				addend += target - sym->address;
-			} else if (type == ELF<C>::R_X86_64_NONE) {
-				if (size == 4) {
-					type = ELF<C>::R_X86_64_RELATIVE;
-				} else if (size == 8) {
-					type = ELF<C>::R_X86_64_RELATIVE64;
+			if (symbol_name == nullptr) {
+				auto sym = this->symbols.floor(target);
+				if (sym) {
+					symbol_name = sym->name;
+					addend += target - sym->address;
+				} else if (type == ELF<C>::R_X86_64_NONE) {
+					if (size == 4) {
+						type = ELF<C>::R_X86_64_RELATIVE;
+					} else if (size == 8) {
+						type = ELF<C>::R_X86_64_RELATIVE64;
+					}
 				}
 			}
-		}
-		if (type == ELF<C>::R_X86_64_NONE) {
-			switch (size) {
-				case 1:
-					type = ELF<C>::R_X86_64_PC8;
-					break;
-				case 2:
-					type = ELF<C>::R_X86_64_PC16;
-					break;
-				case 4:
-					type = ELF<C>::R_X86_64_PC32;
-					break;
-				case 8:
-					type = ELF<C>::R_X86_64_PC64;
-					break;
+			if (type == ELF<C>::R_X86_64_NONE) {
+				switch (size) {
+					case 1:
+						type = ELF<C>::R_X86_64_PC8;
+						break;
+					case 2:
+						type = ELF<C>::R_X86_64_PC16;
+						break;
+					case 4:
+						type = ELF<C>::R_X86_64_PC32;
+						break;
+					case 8:
+						type = ELF<C>::R_X86_64_PC64;
+						break;
+				}
 			}
 		}
 		return sym.rels.emplace(rel_address, type, this->elf.header.machine(), symbol_name, addend, false, target, true, access_flags, offset).second;
@@ -914,8 +921,7 @@ class AnalyzeX86 : public Analyze<C> {
 								// Handle FS segment (TLS in Linux)
 								if (op.mem.segment == X86_REG_FS) {
 									auto tls_end = this->tls_segment.has_value() ? Math::align_up(this->tls_segment.value().virt_addr() + this->tls_segment.value().virt_size(), this->tls_segment.value().alignment()) : 0;
-									const auto target = Bean::TLS::trans_addr(tls_end + op.mem.disp, true);
-									// TODO TLS reloc
+									create_relocation(sym, insn->address, detail_x86.encoding.disp_offset,Bean::TLS::trans_addr(tls_end + op.mem.disp, true), detail_x86.encoding.disp_size, op.mem.disp, 0, op.access);
 								}
 								// RIP relative memory access
 								if (op.mem.base == X86_REG_RIP)

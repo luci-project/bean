@@ -461,7 +461,7 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 						else if (String::len(relsym->name) > 0)
 							bs << relsym->name << ' ';
 						else
-							bs << "<0x" << hex << relsym->address << "> ";
+							bs << (TLS::is_tls(relsym->address) ? "<TLS:0x" : "<0x") << hex << TLS::virt_addr(relsym->address) << "> ";
 						relsym->id.dump(bs);
 						if (rel.addend != 0)
 							bs.format(" %+ ld", rel.addend);
