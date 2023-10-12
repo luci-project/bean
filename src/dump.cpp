@@ -492,6 +492,18 @@ void Bean::Symbol::dump(BufferStream & bs, Verbosity level, const symtree_t * sy
 				}
 		}
 
+		if (level >= TRACE && !offset_ids.empty()) {
+			bs << prefix << "  " << dec << offset_ids.size() << " Offset ID";
+			if (offset_ids.size() != 1)
+				bs << 's';
+			bs << endl;
+			for (const auto & oid : offset_ids)
+				bs << prefix << "     "
+				   << hex << "0x" << oid.key + address
+				   << dec << " \e[2m(+ " << oid.key << ")\e[22m"
+				   << " = " << setfill('0') << hex << setw(16) << oid.value << endl;
+		}
+
 		if (!deps.empty()) {
 			bs << prefix << "  " << dec << deps.size() << " depending on this" << endl;
 			if (level >= TRACE)
