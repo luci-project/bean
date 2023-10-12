@@ -547,18 +547,22 @@ class Analyze {
 		// 2. Gather (additional) function start addresses by reading call-targets
 		find_additional_functions();
 
-		// 2.5: Add symbols flags
+		// 2.1: Add symbols flags
 		add_flags();
 
-		// 3. Calculate position independent id
-		hash_internal();
-
-		// 4. Calculate full id using references & relocations
-		hash_external();
-
-		// 5. reconstruct relocations and calculate offset ids (if required)
+		// 3: Reconstruct relocations
 		if ((this->flags & Bean::FLAG_RECONSTRUCT_RELOCATIONS) != 0) {
 			reconstruct_relocations();
+		}
+
+		// 4.1 Calculate position independent id
+		hash_internal();
+
+		// 4.2 Calculate full id using references & relocations
+		hash_external();
+
+		// 5. calculate offset ids (if required)
+		if ((this->flags & Bean::FLAG_RECONSTRUCT_RELOCATIONS) != 0) {
 			hash_function_offsets();
 		}
 	}
