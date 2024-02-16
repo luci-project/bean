@@ -99,7 +99,7 @@ $(LIBDIR)/$(TARGET): $(OBJECTS) $(MAKEFILE_LIST)
 $(TARGET): $(LIBDIR)/$(TARGET) $(EXTLIBS) | $(MAKEFILE_LIST)
 	@echo "PKG		$@"
 	@rm -f $@
-	$(VERBOSE) echo 'create $@\n$(foreach FILE,$(LIBDIR)/$(TARGET) $(EXTLIBS),addlib $(FILE)\n)save\nend\n' | ar -M
+	$(VERBOSE) /bin/echo -e 'create $@\n$(foreach FILE,$(LIBDIR)/$(TARGET) $(EXTLIBS),addlib $(FILE)\n)save\nend\n' | ar -M
 
 $(UTILPREFIX)%: $(EXAMPLEDIR)/%.cpp $(MAKEFILE_LIST) $(TARGET) $(EXTLIBS) |
 	@echo "CXX		$@"
