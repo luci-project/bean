@@ -83,10 +83,10 @@ $(BUILDDIR)/%.o: $(SRCFOLDER)/%.cpp $(MAKEFILE_LIST) | $(BUILDDIR)
 
 $(BUILDINFO): FORCE
 	@echo "CXX		$@"
-	@echo 'const char * build_elfo_version() { return "$(shell cd elfo ; git describe --dirty --always --tags)"; } ' \
-	'const char * build_capstone_version() { return "$(shell cd capstone ; git describe --dirty --always --tags)"; } ' \
+	@echo 'const char * build_elfo_version() { return "$(shell cd elfo ; git describe --dirty --always --tags 2>/dev/null || echo unknown)"; } ' \
+	'const char * build_capstone_version() { return "$(shell cd capstone ; git describe --dirty --always --tags 2>/dev/null || echo unknown)"; } ' \
 	'const char * build_capstone_flags() { return "$(subst ",',$(BUILDFLAGS_capstone))"; } ' \
-	'const char * build_$(LIBNAME)_version() { return "$(shell git describe --dirty --always --tags)"; } ' \
+	'const char * build_$(LIBNAME)_version() { return "$(shell git describe --dirty --always --tags 2>/dev/null || echo unknown)"; } ' \
 	'const char * build_$(LIBNAME)_date() { return "$(shell date -R)"; }' \
 	'const char * build_$(LIBNAME)_flags() { return "$(CXXFLAGS)"; }' | $(CXX) $(CXXFLAGS) -x c++ -c -o $@ -
 
