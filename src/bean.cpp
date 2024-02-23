@@ -52,7 +52,7 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 		if (is(machine).in(Elf::EM_386, Elf::EM_486) && relocation.type() == ELF<ELF_Def::Identification::ELFCLASS64>::R_386_RELATIVE)
 			target = addend;
 		else if (resolve_target)
-			target = Relocator(relocation, global_offset_table).value(0);
+			target = Relocator(relocation, global_offset_table).value();
 	}
 }
 
@@ -72,7 +72,7 @@ Bean::SymbolRelocation::SymbolRelocation(const typename ELF<ELF_Def::Identificat
 		if (machine == Elf::EM_X86_64 && is(relocation.type()).in(ELF<ELF_Def::Identification::ELFCLASS64>::R_X86_64_RELATIVE, ELF<ELF_Def::Identification::ELFCLASS64>::R_X86_64_RELATIVE64))
 			target = addend;
 		else if (resolve_target)
-			target = Relocator(relocation, global_offset_table).value(0);
+			target = Relocator(relocation, global_offset_table).value();
 	}
 }
 
@@ -250,6 +250,7 @@ TreeMap<uintptr_t, uintptr_t> Bean::map(const Bean & other, bool use_symbol_name
 				continue;
 			else if (const auto & map_sym = mapping.find(sym.address))
 				if (const auto & other_sym = other.symbols.find(map_sym->value))
+					// TODO: If at least one relocation points to a skipped internal id, do not proceed for this symbol
 					for (const auto & rel : sym.rels)
 						if ((rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_BRANCH) != 0 && (rel.instruction_access & Bean::SymbolRelocation::ACCESSFLAG_LOCAL) != 0) {
 							const auto offset = rel.target - sym.address;

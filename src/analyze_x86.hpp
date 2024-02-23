@@ -327,7 +327,7 @@ class AnalyzeX86 : public Analyze<C> {
 					this->debug_stream << " \e[3m[";
 					if (relocation->symbol_index() == 0) {
 						// No Symbol - calculate target value and add as reference
-						Bean::dump_address(this->debug_stream, Relocator(*relocation).value(0), this->symbols);
+						Bean::dump_address(this->debug_stream, Relocator(*relocation).value(), this->symbols);
 					} else {
 						// Get relocation symbol
 						const auto rel_sym = relocation->symbol();
